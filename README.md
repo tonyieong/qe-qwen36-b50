@@ -16,6 +16,8 @@ A purpose-built SYCL + AVX2 inference engine and OpenAI-compatible server for **
 
 Accuracy vs Q8_0 reference (713-token text): mean KL 0.014, top-1 agreement 95.8 %.
 
+Design notes and development log (in Chinese): [DESIGN.md](DESIGN.md), [DEVLOG.md](DEVLOG.md).
+
 ## Features
 
 - Weight formats: experts IQ4_NL (4.5 bpw), DeltaNet + lm_head Q6, attention + shared experts Q8, int8 KV cache (fp16 scale per 16 values)
