@@ -1,0 +1,5 @@
+qe
+qconv
+*.o
+*.pack
+*.gguf

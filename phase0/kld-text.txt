@@ -1,0 +1,2023 @@
+<|im_start|>user
+用繁體中文解釋BGP路由選擇嘅過程同屬性優先次序。<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Understand User Request:**
+   - **Topic:** BGP (Border Gateway Protocol) route selection process and attribute priority/order.
+   - **Language:** Traditional Chinese (繁體中文)
+   - **Key Components:** 
+     - Explain the BGP route selection process
+     - Explain the attribute priority/order (attributes comparison steps)
+
+2.  **Identify Core Concepts of BGP Route Selection:**
+   - BGP is a path vector protocol used for inter-domain routing.
+   - When a BGP speaker receives multiple paths to the same destination, it must select the best one to install in the routing table.
+   - The selection process follows a strict sequential algorithm, comparing attributes one by one. If a tie occurs, it moves to the next attribute.
+   - Key attributes compared (in order):
+     1. Highest Weight (Cisco-specific, local to router)
+     2. Highest Local Preference
+     3. Locally originated routes (network, redistribute, aggregate)
+     4. Shortest AS_PATH
+     5. Lowest Origin type (IGP < EGP < Incomplete)
+     6. Lowest MED (Multi-Exit Discriminator)
+     7. Prefer eBGP over iBGP paths
+     8. Lowest IGP metric to next-hop
+     9. Oldest route (eBGP)
+     10. Lowest Router ID (or Cluster List length, then neighbor IP)
+     11. Route Reflector Client vs Non-client (sometimes, but usually handled earlier)
+     12. Maximum paths (load balancing)
+   - Note: The exact order can vary slightly depending on vendor (Cisco, Juniper, etc.), but the IETF standard (RFC 4271, RFC 7606) defines the core logic. I'll stick to the widely accepted Cisco implementation as it's the industry standard for teaching, but I'll mention it's vendor-dependent where relevant.
+
+3.  **Structure the Explanation (in Traditional Chinese):**
+   - Introduction: What is BGP route selection?
+   - Core Principle: Sequential comparison, stop at first tie-breaker.
+   - Step-by-step attribute priority/order (with explanations)
+   - Important notes (vendor differences, practical considerations)
+   - Summary
+
+   Structure:
+   - 簡介
+   - 核心原則
+   - 屬性比較順序（詳細步驟）
+   - 補充說明（廠商差異、實務建議）
+   - 總結
+
+4.  **Draft Content (Mental Refinement in Traditional Chinese):**
+
+   *(簡介)*
+   BGP（Border Gateway Protocol）是互聯網上用於不同自治系統（AS）之間交換路由資訊的協議。當一台 BGP 路由器收到多條到達同一目的網路的路由時，必須根據一套嚴格的演算法選出「最佳路徑」（Best Path），並將其放入轉發資料結構中。這個過程稱為 BGP 最佳路徑選擇（BGP Best Path Selection）。
+
+   *(核心原則)*
+   BGP 的路由選擇是「逐項比較、一旦分出勝負即停止」的順序演算法。路由器會依優先順序逐一檢查路由屬性，若在某一步驟中出現明確的勝者，則
+</think>
+
+<|im_end|>
+<|im_start|>user
+用繁體中文解釋BGP路由選擇嘅過程同屬性優先次序。<|im_end|>
+<|im_start|>assistant
+BGP（Border Gateway Protocol，邊界網關協議）係互聯網上用於在不同自治系統（AS）之間交換路由資訊嘅核心協議。與 OSPF 或 RIP 等內部網關協議唔同，BGP 唔係單純由「跳數」或「頻寬」決定路徑，而係透過一連串嚴格嘅**屬性（Attributes）**同**決策過程（Decision Process）**嚟揀選最佳路徑。
+
+以下係用繁體中文詳細解釋 BGP 路由選擇嘅過程同屬性優先次序：
+
+---
+
+### 一、BGP 路由選擇嘅基本原則
+
+BGP 路由器收到多個到達同一個目標網絡（Prefix）嘅路由時，會按照**嚴格嘅順序**去比較屬性。只要前面嘅條件能分出勝負，後面嘅條件就不會再睇。
+
+簡單來說：**「先比長度，再比偏好，最後比來源。」**
+
+---
+
+### 二、BGP 路由決策過程（按優先次序排列）
+
+當 BGP 路由器有兩個或多個到達同一個目的網絡嘅有效路徑時，佢會按照以下步驟進行比較，第一個能分出勝負嘅步驟就係最終決定：
+
+#### 1. 最高優先權（Highest Weight）
+- **定義**：Weight 係 Cisco 私有嘅屬性，只在**本地路由器**有意義。
+- **規則**：數值越大，優先級越高。
+- **特點**：因為只係本地有效，所以唔會傳播給其他 BGP 鄰居。通常用於控制出口流量。
+
+#### 2. 最高本地優先權（Highest Local Preference）
+- **定義**：Local Preference 係標準屬性，會在**整個自治系統（AS）內部**傳播。
+- **規則**：數值越大，優先級越高。
+- **預設值**：通常係 100。
+- **用途**：常用於控制**離開**本 AS 嘅流量（Exit Policy）。例如：希望所有出去嘅流量都走 AS 100，唔走 AS 200。
+
+#### 3. 本機產生嘅路由優先（Locally Originated）
+- **規則**：如果路由係由本機透過 `network` 命令、重分發（Redistribution）或聚合產生嘅，則優先於從 BGP 鄰居學習到嘅路由。
+- **簡單講**：「自己生出嚟嘅路，比由別人教嘅路優先。」
+
+#### 4. 最短 AS_PATH（Shortest AS Path）
+- **定義**：AS_PATH 屬性記錄咗路由經過嘅自治系統（AS）編號序列。
+- **規則**：AS 數量越少，優先級越高。
+- **原因**：假設兩個路徑其他條件一樣，BGP 傾向揀路徑最短嘅，因為通常意味著更少嘅延遲同更穩定。
+- **注意**：BGP 唔會自動糾正 AS_PATH 中嘅重複 AS（除非啟用 AS Prepend 或 AS-Path Reset）。
+
+#### 5. 最低 ORIGIN 代碼（Lowest Origin Code）
+-<|im_end|>
+<|im_start|>user
+用廣東話講下點樣煲一個好飲嘅老火湯。<|im_end|>
+<|im_start|>assistant
+煲一煲靚嘅老火湯，講究就係一個**「耐」**字，但唔係隨便咁擲落去滾就啱晒。要煲出湯清味濃、滋陰補身，以下呢幾個關鍵步驟同小貼士你一定要記住：
+
+### 1. 選材：新鮮係王道
+*   **肉類**：最好揀有少少脂肪嘅部位，例如豬骨要揀「扇骨」或者「筒骨」，雞要揀「老雞」或者「烏雞」，咁樣煲出嚟先會香濃。
+*   **湯料**：藥材或者乾貨（如紅棗、杞子、陳皮、無花果等）要揀乾身、無霉變嘅。
+*   **蔬菜/根莖類**：如紅蘿蔔、節瓜、玉米等，要揀新鮮爽身嘅。
+
+### 2. 預處理：去腥去雜質（最重要一步！）
+呢步做唔好，湯就會有羶味或者血水味。
+*   **飛水（川水）**：
+    *   將豬肉、雞骨等放入**凍水**鍋中（水要浸過肉）。
+    *   加入幾片薑同少少米酒。
+    *   大火煲滾後，繼續滾 2-3 分鐘，你會見到表面有大量灰褐色浮沫。
+    *   撈起肉類，用**熱水**洗淨表面浮沫。**切記：一定要用熱水洗，唔好凍水沖，否則肉質會縮緊，鮮味唔出。**
+*   **乾貨預備**：如乾香菇、蝦米、蠔豉等，要提前用溫水浸軟洗淨。
+
+### 3. 煲湯工具同水量
+*   **容器**：最好用**瓦煲**（陶煲），保溫性好，受熱均勻，煲出嚟湯味最醇厚。如果用砂鍋或者不鏽鋼鍋都得，但效果稍遜。
+*   **水量**：一次過加足水！中途唔好加水，如果真係要加，一定要加**滾水**。
+    *   一般比例：水約為食材嘅 2.5 到 3 倍。因為老火湯會蒸發好多，煲 2-3 小時後，剩返約一煲半到兩煲湯係正常。
+
+### 4. 火候控制：先武後文
+*   **第一步：大火煲滾**
+    *   將飛水後嘅肉類、薑片、以及耐煲嘅湯料（如淮山、蓮子、薏米、陳皮等）放入煲中。
+    *   加入足量滾水，**大火**煲滾。
+*   **第二步：小火慢燉**
+    *   煲滾後，轉**最小火**（燉仔火）。湯面只要保持微微滾動、有少少「菊花心」咁樣就啱晒。
+    *   大火滾會令<|im_end|>
+<|im_start|>user
+寫一篇300字嘅短文，主題係香港嘅夜景。<|im_end|>
+<|im_start|>assistant
+當夜幕低垂，華燈初上，香港便換上了另一副迷人的面孔。維多利亞港兩岸，高聳入雲的摩天大樓亮起璀璨燈光，匯聚成一道流光溢彩的天際線。對面九龍半島的建築群與灣仔的會展中心遙相呼應，光影交織間，彷彿一幅動態的現代主義畫卷。
+
+「幻彩詠香江」音樂燈光秀定期上演，隨著激昂的音樂節奏，樓宇間的燈光明暗交替、變換色彩，將夜空點綴得絢麗奪目。站在天星小輪的甲板上，任憑維港微風拂面，遠望對岸繁華盡收眼底，近看船尾劃出的波光粼粼，那種震撼與浪漫無可取代。
+
+除了壯觀的維港夜景，太平山頂更是觀賞這片燈海的絕佳位置。從萬米高空俯瞰，整座城市如同一顆鑲嵌在南海之濱的巨大鑽石，閃爍著誘人的光芒。香港夜景不僅僅是視覺的盛宴，更是這座國際都會活力與夢想的象徵。無論是你我駐足凝望，還是匆匆掠過，這一刻的璀璨，都深深烙印在香港的靈魂深處，令人流連忘返。<|im_end|>
+<|im_start|>user
+用繁體中文比較Docker同虛擬機嘅分別。<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Language:** Traditional Chinese (繁體中文)
+   - **Topic:** Compare Docker and Virtual Machines (虛擬機)
+   - **Key Request:** "用繁體中文比較Docker同虛擬機嘅分別。" (Compare Docker and Virtual Machines in Traditional Chinese.)
+
+   Note: The user mixed Traditional Chinese characters with some Cantonese phrasing ("同", "嘅"). I should respond in standard Traditional Chinese, but keep it clear and professional, possibly acknowledging the Cantonese phrasing if needed, but standard written Traditional Chinese is best for technical comparisons.
+
+2.  **Identify Core Concepts:**
+   - **Virtual Machine (VM):** Emulates entire hardware, runs a full guest OS, heavy, isolated, slower boot, higher resource usage.
+   - **Docker (Containerization):** Shares host OS kernel, containers isolate processes, lightweight, fast startup, higher density, less isolation than VMs.
+   - **Key Comparison Dimensions:** Architecture, Resource Usage, Performance, Isolation, Portability, Use Cases, Security, Management/Orchestration.
+
+3.  **Structure the Comparison (in Traditional Chinese):**
+   - 引言 (Introduction)
+   - 核心架構差異 (Core Architecture Differences)
+   - 資源使用與效能 (Resource Usage & Performance)
+   - 隔離性與安全性 (Isolation & Security)
+   - 啟動速度與靈活性 (Startup Speed & Flexibility)
+   - 適用場景 (Use Cases)
+   - 總結比較表 (Summary Table)
+   - 結語 (Conclusion)
+
+4.  **Draft Content (Mental Refinement in Traditional Chinese):**
+
+   *引言:* Docker 與虛擬機（VM）都是現代雲端與開發中常用的隔離技術，但它們的設計理念與運作方式有本質差異。以下從多個維度比較兩者：
+
+   *核心架構差異:*
+   - 虛擬機：透過 Hypervisor（虛擬化層）模擬完整硬體，每台 VM 都包含獨立的作業系統（Guest OS）、核心、應用程式與依賴庫。
+   - Docker：基於容器技術，直接共用主機作業系統的核心（Kernel），容器僅包含應用程式及其依賴環境，不內建完整 OS。
+
+   *資源使用與效能:*
+   - 虛擬機：資源開銷大（GB 等級記憶體與儲存空間），啟動慢（分鐘級），效能略低（因硬體虛擬化層與完整 OS 開銷）。
+   - Docker：極度輕量（MB 等級），啟動快（秒級甚至毫秒級），效能接近原生（因無完整 OS 開銷，直接呼叫主機核心）。
+
+   *隔離性與安全性:*
+   - 虛擬機：硬體層級隔離，安全性高，單一 VM 崩潰不影響其他 VM 或主機。
+   - Docker：作業系統層級隔離（cgroups + namespaces），隔離性較弱；若容器逃逸（container escape），可能危及主機。但透過安全最佳實踐（如 rootless、seccomp、AppArmor）可大幅提升。
+
+   *啟動速度與靈活性:*
+   - 虛擬機：啟動慢，遷移/複製耗時，適合長期穩定運作的服務。
+   - Docker：
+</think>
+
+<|im_end|>
+<|im_start|>user
+用繁體中文比較Docker同虛擬機嘅分別。<|im_end|>
+<|im_start|>assistant
+Docker（容器技術）同虛擬機（Virtual Machine, VM）雖然都可以用來隔離應用程序，但它們在架構、資源佔用和啟動速度上有著本質上的分別。以下係詳細嘅比較：
+
+### 1. 核心架構分別
+
+*   **虛擬機 (VM)**：
+    *   採用 **硬體虛擬化** 技術。
+    *   每一台 VM 都包含完整嘅 **操作系統 (Guest OS)**、核心、庫文件同應用程序。
+    *   佢哋透過 **Hypervisor**（虛擬機監控程序）直接模擬硬體資源，所以每個 VM 都係一個獨立、完整嘅系統。
+
+*   **Docker (容器)**：
+    *   採用 **操作系統級虛擬化** 技術。
+    *   容器 **共享宿主機嘅操作系統核心**，只包含應用程序、庫文件同依賴項（即係 Image）。
+    *   佢唔需要模擬硬體，亦唔需要完整嘅 Guest OS，因此更加輕量。
+
+---
+
+### 2. 主要比較表
+
+| 比較項目 | 虛擬機 (VM) | Docker (容器) |
+| :--- | :--- | :--- |
+| **啟動速度** | 慢（幾分鐘） | 極快（秒級或毫秒級） |
+| **資源佔用** | 高（每個 VM 都有完整 OS） | 低（共享宿主機核心） |
+| **性能開銷** | 較高（因需模擬硬體） | 幾乎無（直接運行於宿主機） |
+| **隔離性** | 強（硬體級隔離，更安全） | 較弱（共享核心，隔離性依賴系統） |
+| **磁碟空間** | 大（每個 VM 需幾 GB 到幾十 GB） | 小（Image 通常只有幾百 MB） |
+| **可移植性** | 較差（依賴 Hypervisor 同 OS 版本） | 極高（「一次構建，到處運行」） |
+| **管理複雜度** | 較高（需管理多個 OS 更新） | 較低（只需管理容器同 Image） |
+
+---
+
+### 3. 詳細解析
+
+#### ✅ 虛擬機 (VM) 的優點
+*   **強大的隔離性**：因為每個 VM 都有自己嘅完整操作系統，所以一個 VM 崩潰或受攻擊，通常不會影響其他 VM 或宿主機。適合運行不同類型嘅 OS（例如同一台伺服器上同時跑 Windows 同 Linux）。
+*   **成熟穩定**：技術發展多年，生態系統完善，適合傳統企業應用。
+
+#### ✅ Docker 的優點
+*   **輕量高效**：因為共享核心，容器可以非常快速咁啟動同停止，適合微服務架構（Microservices）同持續集成/持續部署（CI/CD）。
+*   **資源利用率高**：可以在同一台物理機上運行更多容器，節省硬體成本。
+*   **環境一致性**：解決咗「在我機度跑得好，喺伺服器就出错」嘅問題，確保開發、測試、生產環境一致。<|im_end|>
+<|im_start|>user
+解釋Proxmox VE入面PCI passthrough嘅原理同設定步驟。<|im_end|>
+<|im_start|>assistant
+Proxmox VE（PVE）入面嘅 **PCI Passthrough**（又稱 VFIO 直通）係一個非常強大嘅功能，佢允許你將實體硬件（例如 GPU、網卡、HBA 卡）直接「借」畀虛擬機（VM）使用。
+
+以下係詳細嘅原理同設定步驟：
+
+---
+
+### 一、 原理：點解要直通？
+
+#### 1. 傳統虛擬化嘅限制
+喺傳統虛擬化（如 KVM/QEMU 模擬）下，虛擬機通過「模擬設備」嚟訪問硬件。例如，虛擬機以為自己有一張 NVIDIA 顯卡，但實際上係宿主機（Host）嘅 CPU 同顯示驅動喺模擬張顯卡嘅行為。
+*   **缺點**：效能損失大，特別係需要高圖形處理能力（GPU）或高速 I/O（如 NVMe、10GbE 網卡）時，模擬層會成為瓶頸。
+
+#### 2. PCI Passthrough 嘅核心概念
+PCI Passthrough 利用硬體虛擬化技術（Intel VT-d 或 AMD IOMMU），將主機板上嘅 PCI/PCIe 設備**完全綁定**畀某個特定嘅虛擬機。
+*   **過程**：虛擬機直接與物理設備通訊，繞過宿主機嘅虛擬化層。
+*   **優點**：
+    *   **近乎原生效能**：GPU 渲染、遊戲、視頻編解碼效能接近實體機。
+    *   **低延遲**：適合需要即時反應嘅應用（如虛擬桌面 VDIs）。
+*   **缺點/限制**：
+    *   該硬件在直通期間，宿主機無法使用。
+    *   通常只能直通畀一個 VM（除非使用 SR-IOV 等進階技術）。
+    *   需要 CPU 同主機板支援 IOMMU。
+
+---
+
+### 二、 前置條件檢查
+
+在開始之前，必須確認以下三樣嘢：
+
+1.  **CPU 支援**：
+    *   Intel：需支援 **VT-d**。
+    *   AMD：需支援 **AMD-Vi** (IOMMU)。
+2.  **主機板 BIOS/UEFI 設定**：
+    *   開啟 **VT-d** (Intel) 或 **IOMMU** (AMD)。
+    *   建議同時開啟 **Above 4G Decoding** 同 **Resizable BAR**（特別是直通 GPU 時）。
+3.  **Proxmox 版本**：建議使用 7.x 或以上版本（內核較新，VFIO 支援更好）。
+
+---
+
+### 三、 設定步驟（以直通 GPU 為例）
+
+#### 步驟 1：確認硬件 ID 同 IOMMU 群組
+
+1.  登入 Proxmox Shell 或 SSH。
+2.  檢查 IOMMU 是否已啟用：
+    ```bash
+    dmesg | grep -e DMAR -e IOMMU
+    ```
+    如果看到 `AMD-Vi: IOMMU performance counters supported` 或 `DMAR: IOMMU<|im_end|>
+<|im_start|>user
+用廣東話解釋點樣計按揭供款。<|im_end|>
+<|im_start|>assistant
+用廣東話解釋計按揭供款，其實唔係好難，關鍵係要明幾個核心名詞同埋個公式。以下係簡單易懂嘅講法：
+
+### 1. 先明三個重要名詞
+
+*   **貸款額（Loan Amount）**：你向銀行借幾多錢。
+    *   公式：`物業價格 - 首期`
+    *   *例如：樓價 $500 萬，你付 $100 萬首期，貸款額就係 $400 萬。*
+*   **年利率（Annual Interest Rate）**：銀行收你利息嘅比率。
+    *   注意：銀行通常報嘅係「年息」，但供款係按月計，所以要除以 12 變成「月息」。
+*   **按揭期（Loan Tenure）**：你打算分幾年還清。
+    *   通常最長係 25 或 30 年（視乎銀行同借款人年齡）。
+    *   總供款期數 = 年數 x 12 個月。
+
+---
+
+### 2. 基本計算法（等額本息供款法）
+
+銀行大多數用「等額本息」法，即係**每月還相同金額**，但裡面包含嘅「本金」同「利息」比例會隨時間改變（初期還利息多，後期還本金多）。
+
+#### 📌 簡單公式：
+```
+每月供款 = 貸款額 × [月息 × (1 + 月息)^供款期數] ÷ [(1 + 月息)^供款期數 - 1]
+```
+
+#### 🔢 舉個實際例子：
+假設：
+*   貸款額：**$4,000,000**
+*   年利率：**3%** （即月息 = 3% ÷ 12 = 0.25% = 0.0025）
+*   按揭期：**20 年** （即 240 個月）
+
+代入公式：
+1.  月息 = 0.0025
+2.  期數 = 240
+3.  計算：
+    *   (1 + 0.0025)^240 ≈ 1.8194
+    *   分子：4,000,000 × 0.0025 × 1.8194 ≈ 18,194
+    *   分母：1.8194 - 1 = 0.8194
+    *   每月供款 ≈ 18,194 ÷ 0.8194 ≈ **$22,204**
+
+👉 所以，你每月要畀銀行約 **$22,204**。
+
+---
+
+### 3. 實際考慮因素（比公式更重要！）
+
+上面計嘅只係「理論供款」，真實情況要加多幾樣嘢：
+
+#### ✅ 1. 加息風險（P-rate / HIBOR）
+<|im_end|>
+<|im_start|>user
+總結第二次世界大戰嘅主要原因，用繁體中文。<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Topic:** 第二次世界大戰的主要原因 (Main causes of World War II)
+   - **Language:** 繁體中文 (Traditional Chinese)
+   - **Request:** 總結 (Summarize)
+
+2.  **Identify Key Historical Concepts (WWII Causes):**
+   - Treaty of Versailles (凡爾賽條約) - harsh terms on Germany, economic hardship, resentment
+   - Rise of Totalitarianism/Fascism/Nazism - Hitler (Germany), Mussolini (Italy), militarists (Japan)
+   - Failure of the League of Nations (國際聯盟失效) - inability to prevent aggression
+   - Appeasement Policy (綏靖政策) - Britain/France allowing early aggression (Munich Agreement)
+   - Expansionism/Aggression - German Lebensraum, Japanese invasion of Manchuria/China, Italian invasion of Ethiopia
+   - Economic factors - Great Depression (大蕭條) fueling extremism
+   - Immediate trigger - Invasion of Poland (1939)
+
+3.  **Structure the Summary in Traditional Chinese:**
+   - Introduction: Briefly state that WWII's causes were complex and multifaceted.
+   - Main Causes (categorized logically):
+     1. 《凡爾賽條約》的負面影響 (Harsh terms, resentment, economic crisis)
+     2. 極權主義與法西斯主義興起 (Rise of Hitler, Mussolini, Japanese militarism)
+     3. 國際聯盟失效與綏靖政策 (League of Nations weakness, appeasement)
+     4. 經濟大蕭條的催化 (Great Depression fueling extremism)
+     5. 擴張主義與侵略行為 (Germany, Japan, Italy's expansion)
+     6. 直接導火線 (Invasion of Poland)
+   - Conclusion: Briefly state how these factors intertwined to cause global conflict.
+   - Ensure tone is objective, historical, and in Traditional Chinese.
+
+4.  **Draft the Content (Mental Refinement in Traditional Chinese):**
+   第二次世界大戰的爆發是多重歷史因素交織的結果，主要可歸納為以下幾點：
+   1. **《凡爾賽條約》的懲罰性條款**：一戰結束後，協約國對德國施加嚴苛賠償與領土割讓，引發德國強烈民族主義與復仇情緒，為納粹崛起埋下伏筆。
+   2. **極權與法西斯主義興起**：1930年代，德國希特勒納粹黨、義大利墨索里尼法西斯政權及日本軍國主義相繼掌權，推行擴張與種族優越論，積極準備戰爭。
+   3. **國際聯盟失效與「綏靖政策」**：國際聯盟缺乏實際約束力，無法制止侵略行為；英國與法國採納「綏靖政策」，對德日意早期擴張妥讓（如《慕尼黑協定》），反而助長侵略者氣焰。
+   4. **1929年經濟大蕭條的衝擊**：全球經濟崩潰導致社會動盪、失業飆升，各國傾向保護主義與對外轉嫁危機
+</think>
+
+<|im_end|>
+<|im_start|>user
+總結第二次世界大戰嘅主要原因，用繁體中文。<|im_end|>
+<|im_start|>assistant
+第二次世界大戰（1939–1945）的爆發並非單一事件所致，而是多重政治、經濟與意識形態因素長期積累的結果。以下是導致這場全球衝突的主要原因總結：
+
+### 1. 《凡爾賽條約》的後遺症與德國復仇主義
+*   **嚴苛懲罰**：一戰結束後，1919 年簽訂的《凡爾賽條約》對德國施加了嚴厲的懲罰，包括巨額賠款、領土割讓以及軍事限制。這導致德國社會普遍產生屈辱感和復仇情緒。
+*   **納粹崛起**：阿道夫·希特勒及納粹黨利用德國人的不滿，宣揚極端民族主義和反猶太主義，承諾恢復德國的榮耀，從而掌握政權。
+
+### 2. 法西斯主義與極權主義的擴張
+*   **軸心國結盟**：德國（納粹主義）、義大利（法西斯主義）和日本（軍國主義）相繼建立極權政權。這些政權主張國家至上、軍事擴張和反對共產主義及自由民主。
+*   **擴張政策**：這些國家分別追求「生存空間」（Lebensraum）、建立「大東亞共榮圈」以及恢復帝國榮耀，透過侵略鄰國來擴張勢力範圍。
+
+### 3. 國際聯盟的失敗與集體安全體系的崩潰
+*   **無力制止侵略**：國際聯盟缺乏執行力，且美國未加入、蘇聯早期被排斥，使其無法有效制裁侵略行為。
+*   **綏靖政策**：英國和法國在 1930 年代採取「綏靖政策」（Appeasement），試圖透過讓步（如《慕尼黑協定》）來避免戰爭，但這反而鼓勵了希特勒進一步擴張。
+
+### 4. 經濟大蕭條的影響
+*   **全球經濟危機**：1929 年爆發的大蕭條嚴重打擊了全球經濟，特別是德國和日本。經濟崩潰導致社會動盪、失業率高漲，為極端政權上台提供了土壤。
+*   **資源爭奪**：為了擺脫經濟困境，日本入侵中國東北（1931）和中國全境（1937），德國則透過重整軍備和擴張來刺激經濟，加劇了國際緊張局勢。
+
+### 5. 日本在亞洲的侵略與太平洋矛盾的激化
+*   **日華戰爭**：日本自 1937 年起全面侵華，引發長期戰爭。
+*   **與美國衝突**：日本為獲取石油、橡膠等戰略資源，向南擴張至東南亞，這直接威脅到美國、英國和荷蘭的利益，最終導致 1941 年日本偷襲珍珠港，美國參戰，戰爭真正全球化。
+
+### 6. 蘇聯的戰略考量與《莫洛托夫-里賓特洛甫條約》
+*   **蘇德互不侵犯**：1939 年，納粹德國與蘇聯簽署互不侵犯條約，秘密協議瓜分波蘭。這使德國得以避免兩線作戰，並於 1939 年 9 月<|im_end|>
+<|im_start|>user
+解釋Linux入面cgroups同namespaces嘅作用。<|im_end|>
+<|im_start|>assistant
+Linux 入面嘅 **Namespaces** 同 **cgroups** 係現代 Linux 系統實現虛擬化（Virtualization）同容器技術（Containerization，例如 Docker、Kubernetes）嘅兩大核心基礎設施。佢哋共同作用，令多個應用程式可以喺同一台伺服器上隔離運行，互不影響。
+
+以下係簡單易懂嘅解釋：
+
+---
+
+### 1. Namespaces：負責「隔離」（Isolation）
+
+**核心作用：** 讓每個進程（Process）覺得自己擁有獨立嘅系統資源視圖，從而達到**隔離**嘅效果。
+
+你可以想像 Namespaces 就好似一層層嘅「透視窗」或者「隔離艙」。每個進程或進程組只能看到自己艙內嘅資源，唔會知道或干擾到其他艙嘅存在。
+
+Linux 提供咗多種 Namespaces，分別隔離唔同類型嘅資源：
+
+| Namespace 類型 | 隔離內容 | 例子 |
+| :--- | :--- | :--- |
+| **PID** (Process ID) | 進程 ID | 容器 A 入面嘅 PID 1，同容器 B 入面嘅 PID 1 係完全獨立嘅。 |
+| **NET** (Network) | 網絡資源 | 每個容器有自己嘅 IP、MAC 地址、網絡接口（eth0），彼此隔離。 |
+| **MNT** (Mount) | 文件系統掛載點 | 每個容器有自己嘅根目錄（/），唔會看到主機或其他容器嘅文件。 |
+| **UTS** (Hostname) | 主機名同域名 | 每個容器可以設定自己嘅 hostname，好似一台獨立伺服器。 |
+| **IPC** (Inter-Process Communication) | 進程間通訊 | 防止容器之間透過共享內存、訊號量等方式通訊。 |
+| **USER** | 用戶同組 ID | 容器內嘅 root 用戶可能對應到主機上嘅普通用戶，提升安全性。 |
+| **CGROUP** | cgroups 本身 | 限制進程所屬嘅 cgroup。 |
+
+**簡單比喻：**  
+Namespaces 就好似公寓入面嘅**獨立單位**。你住喺 101 室，你唔會聽到隔壁 102 室嘅聲音，亦都唔會誤入對方屋企。每個單位都有自己嘅「世界觀」。
+
+---
+
+### 2. cgroups (Control Groups)：負責「限制與資源管理」（Resource Limiting & Accounting）
+
+**核心作用：** 對進程組使用嘅系統資源（如 CPU、記憶體、磁碟 I/O、網絡頻寬）進行**限制、優先級設定同監控**。
+
+Namespaces 只係負責隔離視圖，但並唔會限制資源用量。如果一個進程發瘋咗，佔用咗 100% CPU，其他進程都會變慢。cgroups 就係解決這個問題嘅。
+
+主要功能：
+
+- **資源限制（Limiting）：** 設定某個容器最多只能用幾多記憶體（例如 512MB），超過咗就會被<|im_end|>
+<|im_start|>user
+用繁體中文寫一份簡單嘅辭職信範本。<|im_end|>
+<|im_start|>assistant
+這是一份簡單得體、專業且通用的辭職信範本，適用於大多數職場情況。你可以根據實際情況填寫括號中的內容。
+
+***
+
+**郵件主旨：** 辭職信 - [你的姓名]
+
+**[主管姓名] 您好，**
+
+我寫這封信是正式通知您，我將辭去目前在 **[公司名稱]** 擔任的 **[職位名稱]** 一職。根據勞動合約規定，我的最後工作日為 **[最後工作日期，例如：2023年11月30日]**。
+
+感謝您在這段期間給予我的指導與信任，讓我在 **[公司名稱]** 的經歷非常珍貴，我也從中學到了許多寶貴的經驗。
+
+在離職前的這段期間，我將全力配合團隊進行工作交接，確保各項事務順利過渡。如有任何需要協助之處，請隨時告知。
+
+祝願 **[公司名稱]** 未來業務蒸蒸日上，團隊成員工作順利。
+
+此致
+敬禮
+
+**[你的姓名]**
+**[日期：YYYY/MM/DD]**
+
+***
+
+### 💡 小貼士：
+1. **確認合約規定**：請先查閱你的勞動合約或員工手冊，確認需要提前多少天通知（台灣通常為 30 天，但請以合約為準）。
+2. **保持專業**：即使離職原因不愉快，辭職信中也建議保持客觀與感謝的態度，好聚好散對未來背調有幫助。
+3. **面談優先**：建議先與主管進行口頭溝通後，再發送這封正式郵件作為紀錄。<|im_end|>
+<|im_start|>user
+Write a Python asyncio web scraper with rate limiting and retries.<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Understand User Request:**
+   - **Language:** Python
+   - **Concurrency Model:** `asyncio`
+   - **Task:** Web scraper
+   - **Key Features:** Rate limiting, retries
+   - **Output:** A complete, working Python script/example
+
+2.  **Identify Key Components:**
+   - Async HTTP client: `aiohttp` is the standard choice for async Python web scraping.
+   - Rate limiting: Need a mechanism to control request rate (e.g., token bucket, sliding window, or simple delay). I'll implement a simple but effective token bucket or use `asyncio.Semaphore` + delays. Actually, a token bucket is better for true rate limiting, but a simple delay-based approach with `asyncio.sleep` is often sufficient and easier to understand. I'll go with a token bucket or a simple async rate limiter class.
+   - Retries: Need exponential backoff with jitter, handling transient errors (like 429, 5xx, connection errors).
+   - Error handling: Catch exceptions, log them, and decide whether to retry.
+   - Data extraction: Basic HTML parsing (e.g., `BeautifulSoup` or `lxml`). I'll use `BeautifulSoup` for simplicity, but note that `aiohttp` is async-friendly with it.
+   - Structure: A class or set of functions to encapsulate the scraper logic.
+
+3.  **Design the Rate Limiter:**
+   - Option 1: Simple delay between requests (not true rate limiting if multiple URLs are scraped concurrently).
+   - Option 2: Token Bucket algorithm. I'll implement a lightweight async token bucket.
+   - Option 3: Use `aiolimiter` library. But the user likely wants a self-contained solution without external dependencies beyond `aiohttp` and `beautifulsoup4`. I'll implement a simple token bucket manually.
+
+   Token Bucket implementation:
+   - `max_tokens`: max requests per second
+   - `tokens`: current tokens
+   - `last_refill`: timestamp
+   - `acquire()`: async method that sleeps until a token is available
+   - Refill tokens based on elapsed time
+
+   Actually, a simpler approach for rate limiting in asyncio is using `asyncio.Semaphore` for concurrency control + a delay, but that's not exactly rate limiting. Let's stick with a token bucket.
+
+   Wait, there's an even simpler and more robust way: use `asyncio.Queue` or just a `time.sleep` equivalent with `asyncio.sleep`, but for true rate limiting, I'll implement a basic token bucket.
+
+   Let's draft a token bucket:
+   ```python
+   import asyncio
+   import time
+
+   class TokenBucket:
+       def __init__(self, rate_per_second):
+           self.rate = rate_per_second
+           self.tokens = rate_per_second
+           self.last_refill = time.monotonic()
+           self.lock = asyncio.Lock()
+
+       async def acquire(self):
+           while True:
+               async with self.lock:
+                   now = time.monotonic()
+                   elapsed = now - self.last_refill
+                   self.tokens = min(self.rate, self.tokens + elapsed * self.rate)
+                   self.last_refill = now
+                  
+</think>
+
+<|im_end|>
+<|im_start|>user
+Write a Python asyncio web scraper with rate limiting and retries.<|im_end|>
+<|im_start|>assistant
+```python
+"""
+Asyncio web scraper with rate limiting and retries.
+"""
+
+import asyncio
+import aiohttp
+import time
+import logging
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass, field
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from collections import defaultdict
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScrapedResult:
+    """Represents the result of a scraped URL."""
+    url: str
+    status_code: int
+    content_length: int
+    content: Optional[str] = None
+    error: Optional[str] = None
+    retries: int = 0
+
+
+class RateLimiter:
+    """Token bucket rate limiter for asyncio."""
+    
+    def __init__(self, rate: float = 10, max_tokens: Optional[int] = None):
+        """
+        Initialize the rate limiter.
+        
+        Args:
+            rate: Number of requests per second.
+            max_tokens: Maximum burst size. Defaults to rate.
+        """
+        self.rate = rate
+        self.max_tokens = max_tokens or int(rate)
+        self.tokens = self.max_tokens
+        self.last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self):
+        """Acquire a token, waiting if necessary."""
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                elapsed = now - self.last_refill
+                self.tokens = min(self.max_tokens, self.tokens + elapsed * self.rate)
+                self.last_refill = now
+                
+                if self.tokens >= 1:
+                    self.tokens -= 1
+                    return
+                
+                # Calculate wait time for next token
+                wait_time = (1 - self.tokens) / self.rate
+                # Release the lock while waiting
+                self._lock.release()
+                try:
+                    await asyncio.sleep(wait_time)
+                finally:
+                    await self._lock.acquire()
+
+
+class AsyncWebScraper:
+    """
+    Async web scraper with rate limiting, retries, and connection pooling.
+    """
+    
+    def __init__(
+        self,
+        rate_limit: float = 10.0,
+        max_retries: int = 3,
+        timeout: float = 10.0,
+        user_agent: str = "AsyncScraper/1.0",
+        max_concurrent: int = 5
+    ):
+        """
+        Initialize the scraper.
+        
+        Args:
+            rate_limit: Requests per second.
+            max_retries: Maximum number of retries per URL.
+            timeout: HTTP timeout in seconds.
+            user_agent: User-Agent header.
+            max_concurrent: Maximum concurrent connections.
+        """
+        self.rate_limiter = RateLimiter(rate=rate_limit)
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.user_agent = user_agent
+        self.max_concurrent = max_concurrent
+        self.semaphore = asyncio.Semaphore(max_con<|im_end|>
+<|im_start|>user
+Implement a thread-safe LRU cache in C++17 with tests.<|im_end|>
+<|im_start|>assistant
+```cpp
+#include <iostream>
+#include <list>
+#include <unordered_map>
+#include <shared_mutex>
+#include <string>
+#include <cassert>
+#include <thread>
+#include <vector>
+#include <atomic>
+#include <random>
+
+template <typename Key, typename Value, size_t MaxSize = 1024>
+class LRUCache {
+public:
+    using KeyType = Key;
+    using ValueType = Value;
+    using ListType = std::list<std::pair<Key, Value>>;
+    using MapType = std::unordered_map<Key, typename ListType::iterator>;
+
+    LRUCache() = default;
+
+    // Get the value associated with the key. Returns true if found, false otherwise.
+    bool get(const Key& key, Value& value) {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = map_.find(key);
+        if (it == map_.end()) {
+            return false;
+        }
+        // Move the accessed element to the front (most recently used)
+        auto list_it = it->second;
+        Value val = list_it->second;
+        list_.erase(list_it);
+        list_.push_front(std::make_pair(key, val));
+        map_[key] = list_.begin();
+        value = val;
+        return true;
+    }
+
+    // Put a key-value pair into the cache. If the cache is full, evict the least recently used item.
+    void put(const Key& key, const Value& value) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        auto it = map_.find(key);
+        if (it != map_.end()) {
+            // Key already exists, update value and move to front
+            list_.erase(it->second);
+            list_.push_front(std::make_pair(key, value));
+            map_[key] = list_.begin();
+        } else {
+            // Key doesn't exist
+            if (map_.size() >= MaxSize) {
+                // Evict the least recently used item (back of the list)
+                auto lru_it = list_.back();
+                map_.erase(lru_it.first);
+                list_.pop_back();
+            }
+            list_.push_front(std::make_pair(key, value));
+            map_[key] = list_.begin();
+        }
+    }
+
+    // Check if a key exists in the cache (without updating access order)
+    bool contains(const Key& key) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return map_.find(key) != map_.end();
+    }
+
+    // Check if a key exists and update access order
+    bool containsAndUpdate(const Key& key) {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = map_.find(key);
+        if (it == map_.end()) {
+            return false;
+        }
+        auto list_it = it->second;
+        list_.erase(list_it);
+        list_.push_front(std::make_pair(key, list_it->second));
+        map_[key] = list_.begin();<|im_end|>
+<|im_start|>user
+Write a Bash script to monitor disk usage and send an alert when over 90%.<|im_end|>
+<|im_start|>assistant
+```bash
+#!/bin/bash
+
+# Disk Usage Monitor Script
+# Sends an alert when disk usage exceeds 90%
+
+# Configuration
+THRESHOLD=90
+EMAIL_RECIPIENT="admin@example.com"
+HOSTNAME=$(hostname)
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Function to get disk usage percentage for a specific mount point
+get_disk_usage() {
+    local mount_point="$1"
+    # Use df to get usage, skip header, get usage percentage, remove '%' sign
+    local usage
+    usage=$(df "$mount_point" 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
+    
+    if [ -z "$usage" ]; then
+        echo "0"
+        return 1
+    fi
+    
+    echo "$usage"
+    return 0
+}
+
+# Function to send email alert
+send_alert() {
+    local mount_point="$1"
+    local usage="$2"
+    local subject="[ALERT] Disk Usage Critical on $HOSTNAME: $mount_point is at ${usage}%"
+    local body="Disk usage alert on $HOSTNAME at $TIMESTAMP
+
+Mount Point: $mount_point
+Current Usage: ${usage}%
+Threshold: ${THRESHOLD}%
+
+Please take action to free up disk space."
+
+    # Send email if mail command is available
+    if command -v mail &>/dev/null; then
+        echo "$body" | mail -s "$subject" "$EMAIL_RECIPIENT"
+    elif command -v sendmail &>/dev/null; then
+        {
+            echo "Subject: $subject"
+            echo "To: $EMAIL_RECIPIENT"
+            echo ""
+            echo "$body"
+        } | sendmail "$EMAIL_RECIPIENT"
+    else
+        echo "WARNING: No mail command available. Email alert could not be sent."
+        echo "Subject: $subject"
+        echo "Body: $body"
+    fi
+}
+
+# Function to log the alert
+log_alert() {
+    local mount_point="$1"
+    local usage="$2"
+    local log_file="/var/log/disk_usage_monitor.log"
+    
+    echo "$TIMESTAMP - ALERT: $mount_point is at ${usage}% on $HOSTNAME" >> "$log_file"
+}
+
+# Function to log normal status
+log_status() {
+    local mount_point="$1"
+    local usage="$2"
+    local log_file="/var/log/disk_usage_monitor.log"
+    
+    echo "$TIMESTAMP - INFO: $mount_point is at ${usage}% on $HOSTNAME" >> "$log_file"
+}
+
+# Main monitoring function
+monitor_disk_usage() {
+    local alert_sent=false
+    
+    # Get all mounted filesystems, excluding pseudo/empty ones
+    while IFS= read -r line; do
+        local mount_point
+        mount_point=$(echo "$line" | awk '{print $6}')
+        local filesystem
+        filesystem=$(echo "$line" | awk '{print $1}')
+        
+        # Skip pseudo filesystems and empty mount points
+        if [[ "$filesystem" == *"tmpfs"* ]] || [[ "$filesystem" == *"devtmpfs<|im_end|>
+<|im_start|>user
+Explain the transformer attention mechanism with equations.<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Understand User Request:**
+   - **Topic:** Transformer attention mechanism
+   - **Requirement:** Explain with equations
+   - **Goal:** Provide a clear, accurate, and comprehensive explanation suitable for someone who wants to understand the mathematical foundation.
+
+2.  **Identify Key Components of Transformer Attention:**
+   - Multi-Head Attention (usually the core, but start with Scaled Dot-Product Attention)
+   - Queries (Q), Keys (K), Values (V)
+   - Scaling factor ($d_k$)
+   - Softmax normalization
+   - Matrix multiplications and broadcasting
+   - Multi-head extension (optional but important)
+   - Residual connections & Layer Norm (briefly mention as context, but focus on attention)
+
+3.  **Structure the Explanation:**
+   - Introduction: What is attention? Why is it important in Transformers?
+   - Scaled Dot-Product Attention (core equation)
+   - Step-by-step breakdown of the equation
+   - Multi-Head Attention (equation + intuition)
+   - Practical considerations (masking, implementation notes)
+   - Summary
+
+4.  **Draft - Section by Section (Mental Refinement):**
+
+   *Introduction:*
+   The attention mechanism in Transformers allows the model to dynamically weigh the importance of different parts of the input sequence when processing each element. Unlike RNNs, it processes all positions in parallel and captures long-range dependencies efficiently.
+
+   *Scaled Dot-Product Attention:*
+   The fundamental building block is Scaled Dot-Product Attention. Given input sequences represented as matrices:
+   - $Q \in \mathbb{R}^{n \times d_k}$ (Queries)
+   - $K \in \mathbb{R}^{m \times d_k}$ (Keys)
+   - $V \in \mathbb{R}^{m \times d_v}$ (Values)
+   The attention function is:
+   $\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$
+
+   *Breakdown:*
+   - $QK^T$: Computes dot products between each query and all keys → attention scores
+   - $\frac{1}{\sqrt{d_k}}$: Scaling factor prevents softmax from pushing into regions with extremely small gradients when $d_k$ is large
+   - $\text{softmax}(\cdot)$: Normalizes scores to a probability distribution (row-wise)
+   - Multiply by $V$: Weighted sum of values based on attention weights
+
+   *Multi-Head Attention:*
+   Instead of one attention head, use $h$ heads to allow joint attention from different representation subspaces:
+   $\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h)W^O$
+   where $\text{head}_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)$
+   with projection matrices $W_i^Q \in \mathbb{R}^{d_{model} \times d_k}$, $W_i^K \in \mathbb{R}^{d_{
+</think>
+
+<|im_end|>
+<|im_start|>user
+Explain the transformer attention mechanism with equations.<|im_end|>
+<|im_start|>assistant
+# The Transformer Attention Mechanism
+
+## Overview
+
+The core of the Transformer architecture is the **Scaled Dot-Product Attention** mechanism. It allows the model to weigh the importance of different parts of the input sequence when producing each output element.
+
+---
+
+## Scaled Dot-Product Attention
+
+Given:
+- **Q** (Queries): shape `(n_queries, d_k)`
+- **K** (Keys): shape `(n_keys, d_k)`
+- **V** (Values): shape `(n_keys, d_v)`
+
+The attention function is defined as:
+
+$$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+
+### Step-by-Step Breakdown
+
+### 1. Compute Attention Scores
+
+$$\text{Scores} = QK^T$$
+
+Each entry `(i, j)` in the resulting matrix represents how much position `i` should attend to position `j`.
+
+### 2. Scale the Scores
+
+$$\text{Scaled Scores} = \frac{QK^T}{\sqrt{d_k}}$$
+
+**Why divide by $\sqrt{d_k}$?**
+- When $d_k$ is large, the dot products grow in magnitude, pushing the softmax into regions with extremely small gradients.
+- Scaling prevents this, stabilizing training.
+
+### 3. Apply Softmax
+
+$$\text{Attention Weights} = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)$$
+
+For each row `i`:
+
+$$\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)_{ij} = \frac{\exp\left(\frac{Q_i \cdot K_j^T}{\sqrt{d_k}}\right)}{\sum_{k=1}^{n} \exp\left(\frac{Q_i \cdot K_k^T}{\sqrt{d_k}}\right)}$$
+
+This produces a probability distribution over the keys for each query.
+
+### 4. Weighted Sum of Values
+
+$$\text{Output} = \text{Attention Weights} \times V$$
+
+Each output is a weighted combination of all value vectors, where weights are determined by how relevant each key is to the query.
+
+---
+
+## Multi-Head Attention
+
+Instead of computing attention once, the model uses **multiple independent attention heads** to capture different aspects of dependency:
+
+### 1. Linear Projections
+
+For each head $h$ (from $1$ to $h$):
+
+$$Q_h = W_h^Q Q, \quad K_h = W_h^K K, \quad V_h = W_h^V V$$
+
+where $W_h^Q, W_h^K, W_h^V \in \mathbb{R}^{d_{model} \times d_k}$
+
+### 2. Parallel Attention Computation
+
+$$\text{head}_h = \text{Attention}(Q_h, K_h, V_h)$$
+
+### 3. Concatenate and Project
+
+$$\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h<|im_end|>
+<|im_start|>user
+Write a SQL query to find the top 3 customers by revenue per month, and explain it.<|im_end|>
+<|im_start|>assistant
+# Top 3 Customers by Revenue Per Month
+
+## SQL Query
+
+```sql
+WITH monthly_revenue AS (
+    -- Step 1: Calculate total revenue per customer per month
+    SELECT
+        c.customer_id,
+        c.customer_name,
+        YEAR(o.order_date)   AS order_year,
+        MONTH(o.order_date)  AS order_month,
+        SUM(oi.quantity * oi.unit_price) AS total_revenue
+    FROM
+        customers       c
+    JOIN    orders          o   ON c.customer_id = o.customer_id
+    JOIN    order_items     oi  ON o.order_id = oi.order_id
+    GROUP BY
+        c.customer_id,
+        c.customer_name,
+        YEAR(o.order_date),
+        MONTH(o.order_date)
+),
+ranked_customers AS (
+    -- Step 2: Rank customers within each month by revenue (descending)
+    SELECT
+        customer_id,
+        customer_name,
+        order_year,
+        order_month,
+        total_revenue,
+        RANK() OVER (
+            PARTITION BY order_year, order_month
+            ORDER BY total_revenue DESC
+        ) AS revenue_rank
+    FROM
+        monthly_revenue
+)
+-- Step 3: Filter to top 3 per month
+SELECT
+    customer_name,
+    order_year,
+    order_month,
+    total_revenue,
+    revenue_rank
+FROM
+    ranked_customers
+WHERE
+    revenue_rank <= 3
+ORDER BY
+    order_year,
+    order_month,
+    revenue_rank;
+```
+
+## Explanation
+
+### Step-by-Step Breakdown
+
+| Step | Clause | Purpose |
+|------|--------|---------|
+| 1 | `monthly_revenue` CTE | Aggregates revenue **per customer per month** by joining `customers`, `orders`, and `order_items`. Revenue is calculated as `quantity × unit_price` summed across all order items. |
+| 2 | `ranked_customers` CTE | Uses the window function `RANK()` to assign a rank **within each month** (`PARTITION BY order_year, order_month`). Customers are ordered by `total_revenue DESC`, so the highest earner gets rank 1. |
+| 3 | Final `SELECT` | Filters to only rows where `revenue_rank <= 3`, ensuring we get the **top 3 customers per month**. Results are sorted by year, month, and rank for readability. |
+
+### Key Concepts
+
+1. **Common Table Expressions (CTEs)** – Improve readability by breaking the query into logical steps. Each CTE builds on the previous one.
+
+2. **Window Function `RANK()`** – Unlike `ROW_NUMBER()`, `RANK()` handles ties. If two customers tie for 1st place, both get rank 1, and the next customer gets rank 3 (not 2). Use `DENSE_RANK()` if you prefer consecutive ranks (1, 1, 2).
+
+3. **`PARTITION BY`** – Resets the ranking for each month, so rankings are computed **independently per month**.
+
+4. **Aggregation** – `SUM(oi.quantity * oi.unit_price)` computes the total revenue for each customer-month combination.
+
+### Sample Output
+
+| customer_name<|im_end|>
+<|im_start|>user
+Write a Go HTTP server with middleware for logging and auth.<|im_end|>
+<|im_start|>assistant
+```go
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Middleware is a function that wraps an http.Handler
+type Middleware func(http.Handler) http.Handler
+
+// LoggerMiddleware logs request details
+func LoggerMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		// Wrap the ResponseWriter to capture status code
+		wrapped := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		
+		next.ServeHTTP(wrapped, r)
+		
+		duration := time.Since(start)
+		log.Printf(
+			"%s %s %d %s",
+			r.Method,
+			r.URL.Path,
+			wrapped.statusCode,
+			duration,
+		)
+	})
+}
+
+// statusResponseWriter wraps http.ResponseWriter to capture the status code
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+// WriteHeader captures the status code
+func (sw *statusResponseWriter) WriteHeader(code int) {
+	sw.statusCode = code
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+// AuthMiddleware checks for a valid API key in the Authorization header
+func AuthMiddleware(next http.Handler, validKey string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+			return
+		}
+
+		// Expect format: "Bearer <token>"
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, `{"error":"invalid authorization format"}`, http.StatusUnauthorized)
+			return
+		}
+
+		token := parts[1]
+		if token != validKey {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// jsonResponse writes a JSON response
+func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func main() {
+	mux := http.NewServeMux()
+
+	// Protected endpoint
+	mux.HandleFunc("/api/protected", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"message": "You have accessed a protected resource",
+			"method":  r.Method,
+		})
+	})
+
+	// Public endpoint
+	mux.HandleFunc("/api/public", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"message": "This is a public resource",
+			"method":  r.Method,
+		})
+	})
+
+	// Health check
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *<|im_end|>
+<|im_start|>user
+Explain how TLS 1.3 handshake works step by step.<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Understand User Request:** The user wants a step-by-step explanation of how the TLS 1.3 handshake works.
+
+2.  **Identify Key Concepts of TLS 1.3 Handshake:**
+   - TLS 1.3 is the latest version of the Transport Layer Security protocol.
+   - Key improvements over TLS 1.2: faster (1-RTT, optionally 0-RTT), more secure (removed legacy algorithms), simplified, forward secrecy required, encryption of more handshake messages.
+   - Core flow: Client Hello, Server Hello, Encrypted Extensions, Certificate, Certificate Verify, Server Finished, (Optional: Client Certificate, Client Certificate Verify, Client Finished), Application Data.
+   - Cryptographic primitives: Mostly AEAD ciphers (AES-GCM, ChaCha20-Poly1305), key exchange via (EC)DHE, signatures for authentication.
+   - Handshake message flow and state transitions.
+
+3.  **Structure the Explanation:**
+   - Brief introduction to TLS 1.3 and its key features
+   - Step-by-step breakdown of the handshake
+   - Explain each step's purpose, messages exchanged, and cryptographic operations
+   - Mention 0-RTT and 1-RTT variants
+   - Highlight security improvements
+   - Keep it clear, technical but accessible, and accurate
+
+4.  **Draft - Step by Step (Mental Refinement):**
+   *Pre-handshake:* Client and server have existing certificates/CA trust, but no shared keys yet.
+   
+   *Step 1: ClientHello*
+   - Client sends ClientHello
+   - Contains: supported TLS version, random nonce, cipher suites, key share (client's ECDHE public key), supported signatures, ALPN, etc.
+   - No session ticket yet (initial)
+   
+   *Step 2: ServerHello*
+   - Server responds with ServerHello
+   - Chooses: TLS version, cipher suite, server's ECDHE public key (key share), server random, selected ALPN, etc.
+   - Followed immediately by: EncryptedExtensions, CertificateRequest (optional), Certificate, CertificateVerify, ServerFinished
+   - Note: All these server messages after ServerHello are encrypted with the handshake traffic key derived from the (EC)DHE shared secret.
+   
+   *Step 3: Key Derivation*
+   - Both compute shared secret via ECDHE
+   - Derive handshake traffic secret and keys using HKDF-SHA256/384
+   - This enables encryption of subsequent handshake messages
+   
+   *Step 4: Server's Encrypted Handshake Messages*
+   - EncryptedExtensions: TLS parameters (compression, etc.)
+   - CertificateRequest (optional): Asks for client cert
+   - Certificate: Server's certificate chain
+   - CertificateVerify: Server signs transcript to prove possession of private key
+   - Finished: MAC over handshake transcript to verify integrity
+   
+   *Step 5: Client Processing & Response*
+   - Client verifies server cert, checks signature, validates Finished
+   - Client sends: Certificate (if requested), CertificateVerify, Finished
+   - All encrypted with handshake traffic keys
+   - Client also computes application traffic keys
+   
+   *Step 6: Key Update &
+</think>
+
+<|im_end|>
+<|im_start|>user
+Explain how TLS 1.3 handshake works step by step.<|im_end|>
+<|im_start|>assistant
+The TLS 1.3 handshake is significantly faster and more secure than previous versions (like TLS 1.2). Its primary goals are:
+
+1.  **Reduce latency:** Typically completing in **1-RTT** (one round-trip time), or even **0-RTT** with resumption.
+2.  **Remove insecure features:** No RSA key exchange, no static Diffie-Hellman, no compression, no renegotiation.
+3.  **Encrypt more:** The handshake messages are now encrypted after the initial ClientHello.
+
+We’ll assume the **standard 1-RTT handshake** (no prior connection/resumption).
+
+---
+
+## 🌟 Overview of TLS 1.3 Handshake Steps
+
+```
+Client                                          Server
+  |                                               |
+  |  ClientHello (encrypted later)                |
+  | --------------------------------------------> |
+  |                                               |  ServerHello
+  |                                               | + EncryptedExtensions
+  |                                               | + CertificateRequest*
+  |                                               | + Certificate
+  |                                               | + CertificateVerify
+  |                                               | + Finished
+  | <--------------------------------------------- |
+  |                                               |
+  |  EncryptedExtensions*                           |
+  |  Certificate*                                   |
+  |  CertificateVerify*                             |
+  |  Finished                                       |
+  | --------------------------------------------> |
+  |                                               |
+  |  [Application Data encrypted]                   |
+  | <--------------------------------------------> |
+```
+
+> **Note:** Messages marked with `*` are optional (e.g., `CertificateRequest` is only used for client authentication).
+
+---
+
+## 🔍 Step-by-Step Explanation
+
+### **Step 1: ClientHello**
+The client initiates the handshake.
+
+- Sends a list of **supported TLS versions** (only TLS 1.3 is accepted).
+- Sends **cipher suites** it supports (e.g., `TLS_AES_128_GCM_SHA256`).
+- Sends **key shares**: The client generates an ephemeral key pair (using X25519, P-256, etc.) and sends the public key.
+- Sends **supported groups** (e.g., x25519, secp256r1).
+- Sends **signature algorithms** it supports for authentication.
+- Includes a **cookie** (optional, for anti-amplification).
+- Includes **session tickets** or **PSKs** (if resuming).
+
+✅ **This is the only unencrypted message.**
+
+---
+
+### **Step 2: ServerHello**
+The server responds.
+
+- Chooses the **TLS version** (TLS 1.3).
+- Chooses a **cipher suite** from the client’s list.
+- Chooses a **key share** from the client’s list.
+- Sends its own **ephemeral public key** (key share).
+- Includes a **cookie** (optional).
+
+✅ **Still unencrypted.**
+
+> At this point, both client and server have computed the **shared secret** using their private key and the other party’s public key (via ECDHE).
+
+---
+
+### **Step 3: Encrypted Handshake Messages Begin**
+From here on, all messages are encrypted using keys derived from the shared secret.
+
+####<|im_end|>
+<|im_start|>user
+Solve: if 3x + 7 = 2x - 5, find x, then compute x^2 - 4x. Show steps.<|im_end|>
+<|im_start|>assistant
+Here is the step-by-step solution to the problem.
+
+### Step 1: Solve for $x$
+
+We start with the given linear equation:
+$$ 3x + 7 = 2x - 5 $$
+
+To isolate $x$, we first move the variable terms to one side and the constant terms to the other. Subtract $2x$ from both sides:
+$$ 3x - 2x + 7 = -5 $$
+$$ x + 7 = -5 $$
+
+Next, subtract $7$ from both sides to solve for $x$:
+$$ x = -5 - 7 $$
+$$ x = -12 $$
+
+So, the value of $x$ is **$-12$**.
+
+### Step 2: Compute $x^2 - 4x$
+
+Now substitute $x = -12$ into the expression $x^2 - 4x$:
+
+$$ (-12)^2 - 4(-12) $$
+
+Calculate the square of $-12$:
+$$ (-12)^2 = 144 $$
+
+Calculate the product $-4 \times -12$:
+$$ -4 \times -12 = +48 $$
+
+Add the results together:
+$$ 144 + 48 = 192 $$
+
+### Final Conclusion
+
+The value of $x$ is $-12$, and the value of $x^2 - 4x$ is **192**.<|im_end|>
+<|im_start|>user
+A train leaves at 9:00 at 80 km/h; another leaves the same station at 10:30 at 120 km/h. When does the second catch up? Show reasoning.<|im_end|>
+<|im_start|>assistant
+To determine when the second train catches up with the first, we can use the formula:
+
+$$ \text{Distance} = \text{Speed} \times \text{Time} $$
+
+Here is the step-by-step deduction:
+
+### Step 1: Calculate the head start of the first train
+The first train leaves at 9:00, and the second train leaves at 10:30.
+The time difference (head start) is:
+$$ 10:30 - 9:00 = 1.5 \text{ hours} $$
+
+During this 1.5 hours, the first train is traveling at 80 km/h without the second train being on the track. We calculate the distance covered by the first train during this head start:
+$$ \text{Distance}_{\text{head start}} = 80 \text{ km/h} \times 1.5 \text{ h} = 120 \text{ km} $$
+
+So, when the second train starts at 10:30, the first train is already **120 km** ahead.
+
+### Step 2: Determine the relative speed
+The second train is faster than the first train. We need to find out how fast the second train is closing the gap between them. This is the difference in their speeds:
+$$ \text{Relative Speed} = \text{Speed}_{\text{second}} - \text{Speed}_{\text{first}} $$
+$$ \text{Relative Speed} = 120 \text{ km/h} - 80 \text{ km/h} = 40 \text{ km/h} $$
+
+This means the second train closes the gap by 40 kilometers every hour.
+
+### Step 3: Calculate the time required to catch up
+Now we calculate how long it takes for the second train to cover the 120 km gap at a relative speed of 40 km/h:
+$$ \text{Time to catch up} = \frac{\text{Distance Gap}}{\text{Relative Speed}} $$
+$$ \text{Time to catch up} = \frac{120 \text{ km}}{40 \text{ km/h}} = 3 \text{ hours} $$
+
+### Step 4: Determine the final time
+The second train started at 10:30. We add the 3 hours it took to catch up to this start time:
+$$ 10:30 + 3 \text{ hours} = 13:30 $$
+
+13:30 is 1:30 PM.
+
+### Verification
+Let's verify by calculating the total distance traveled by both trains from 9:00.
+*   **First Train:** Travels from 9:00 to 13:30. Total time = 4.5 hours.
+    $$ \text{Distance} = 80 \text{ km/h} \times 4.5 \text{ h} = 360 \text{ km} $$
+*   **Second Train:** Travels from 10:30 to 13:30. Total time = 3 hours.
+    $$ \text{Distance} = 120<|im_end|>
+<|im_start|>user
+Write a React component for a sortable, filterable table with TypeScript.<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Understand User Request:**
+   - **Framework:** React
+   - **Language:** TypeScript
+   - **Component Type:** Sortable, Filterable Table
+   - **Key Features:** Sorting, Filtering, Type-safe (TypeScript)
+
+2.  **Identify Core Requirements:**
+   - Table data structure (array of objects)
+   - Sorting functionality (click headers to sort ascending/descending)
+   - Filtering functionality (input to filter by a specific column or across all columns)
+   - Type definitions for data, sorting state, filtering state
+   - Clean, reusable component structure
+   - Basic styling (inline or via CSS modules/classes, but I'll keep it simple with inline/Tailwind-like classes for portability, or just standard CSS in a styled-components approach. I'll stick to standard inline/class names for simplicity, but mention how to style it)
+
+   *Self-Correction/Refinement during thought:* 
+   - I should make it generic/reusable using TypeScript generics so it can work with different data types.
+   - Need to handle sorting state: which column, which direction (asc/desc).
+   - Need to handle filtering state: filter text, possibly filter column (or global).
+   - I'll implement a clean, modern approach with hooks.
+
+3.  **Design TypeScript Interfaces:**
+   ```typescript
+   type SortDirection = 'asc' | 'desc' | null;
+
+   interface SortConfig<T> {
+     key: keyof T;
+     direction: SortDirection;
+   }
+
+   interface FilterConfig {
+     column: keyof T | 'all';
+     value: string;
+   }
+
+   // Actually, keeping it simple: global filter or column-specific filter. I'll go with a simple text filter that searches across all string fields, or allow specifying a column. Let's do a simple global filter for now, but make it extensible.
+   // Better: Allow filter by a specific column or all. I'll implement a simple text input that filters across all string values for simplicity, but I'll make the types clear.
+   ```
+
+   Let's refine the types for a generic component:
+   ```typescript
+   export type SortDirection = 'asc' | 'desc' | null;
+
+   export interface SortConfig<T> {
+     key: keyof T;
+     direction: SortDirection;
+   }
+
+   export interface DataTableProps<T extends Record<string, unknown>> {
+     data: T[];
+     columns: {
+       key: keyof T;
+       label: string;
+       type?: 'string' | 'number' | 'date' | 'boolean';
+       render?: (value: T[keyof T]) => React.ReactNode;
+     }[];
+     filterable?: boolean;
+     sortable?: boolean;
+   }
+   ```
+
+4.  **Component Structure & State:**
+   - `data`: from props
+   - `columns`: from props
+   - `sortConfig`: state
+   - `filterText`: state
+   - Derived state: `sortedData` (sorted and filtered)
+
+   Actually, I'll compute the filtered and sorted data in a `useMemo` to avoid unnecessary recalculations.
+
+5.  **Implement Logic:**
+</think>
+
+<|im_end|>
+<|im_start|>user
+Write a React component for a sortable, filterable table with TypeScript.<|im_end|>
+<|im_start|>assistant
+```tsx
+import React, { useState, useMemo } from 'react';
+
+// --- Types ---
+
+type SortDirection = 'asc' | 'desc' | null;
+
+interface SortConfig {
+  key: string;
+  direction: SortDirection;
+}
+
+interface TableColumn<T> {
+  key: keyof T;
+  label: string;
+  sortable?: boolean;
+  filterable?: boolean;
+  render?: (value: any, row: T) => React.ReactNode;
+}
+
+interface SortableFilterableTableProps<T> {
+  data: T[];
+  columns: TableColumn<T>[];
+  initialSortKey?: keyof T;
+  initialSortDirection?: SortDirection;
+  pageSize?: number;
+  className?: string;
+  emptyMessage?: string;
+}
+
+// --- Icons ---
+
+const SortAscIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m18 15-6-6-6 6" />
+  </svg>
+);
+
+const SortDescIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+
+const SearchIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
+
+const ChevronRightIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
+// --- Component<|im_end|>
+<|im_start|>user
+Explain the difference between OSPF and IS-IS in detail.<|im_end|>
+<|im_start|>assistant
+Both **Open Shortest Path First (OSPF)** and **Intermediate System to Intermediate System (IS-IS)** are Interior Gateway Protocols (IGPs) that use the **Shortest Path First (SPF)** algorithm (Dijkstra’s algorithm) to build a link-state database and calculate the best path to destinations.
+
+Despite their similarities in theory, they differ significantly in design, implementation, scalability, and ecosystem. Below is a detailed comparison.
+
+---
+
+## 1. Origin and Standardization
+
+| Feature | OSPF | IS-IS |
+|---------|------|-------|
+| **Origin** | Developed by IETF (Internet Engineering Task Force) | Developed by ISO (International Organization for Standardization) |
+| **Standard** | RFC 2328 (OSPFv2 for IPv4), RFC 5340 (OSPFv3 for IPv6) | ISO/IEC 10589 (IS-IS Level 1 & 2), ITU-T I.317 |
+| **Ecosystem** | Dominant in IP networks (Cisco, Juniper, etc.) | Dominant in large service provider networks (AT&T, Deutsche Telekom, etc.) |
+
+---
+
+## 2. Protocol Architecture
+
+### OSPF
+- **Layer 3 Protocol**: OSPF runs directly over IP (Protocol number 89). It has its own packet format.
+- **Area Hierarchy**:
+  - **Backbone Area (Area 0)**: All other areas must connect to Area 0.
+  - **Non-Backbone Areas**: Can be standard, stub, totally stubby, NSSA, etc.
+  - **ABR (Area Border Router)**: Connects areas.
+  - **ASBR (Autonomous System Boundary Router)**: Injects external routes.
+- **Point-to-Point vs. Broadcast**: OSPF distinguishes between network types (Broadcast, NBMA, Point-to-Point, Point-to-MultiPoint).
+
+### IS-IS
+- **Layer 2 Protocol**: IS-IS runs directly over the Data Link Layer (Layer 2), typically using SNAP (Subnetwork Access Protocol) or directly over Ethernet (802.2 LLC). It is **IP-agnostic**, making it easier to support multiple network layer protocols (IPv4, IPv6, CLNP).
+- **Area Hierarchy**:
+  - **Level 1 (L1)**: Intra-area routing (similar to OSPF non-backbone areas).
+  - **Level 2 (L2)**: Inter-area routing (similar to OSPF backbone).
+  - **L1/L2 Routers**: Can perform both functions.
+  - **No strict requirement for a single backbone area**: The L2 backbone can be contiguous or non-contiguous (if using route leaking).
+
+---
+
+## 3. Packet Types and Header Structure
+
+### OSPF
+- **Packet Types**:
+  1. Hello
+  2. Database Description (DBD)
+  3. Link State Request (LSR)
+  4. Link State Update (LSU)
+  5. Link State Acknowledgment (LSAck)
+- **Header**: Contains IP protocol number 89. Fixed header size: 24 bytes.
+
+### IS-IS
+- **PDU Types<|im_end|>
+<|im_start|>user
+Write a Rust function to parse a CSV line handling quoted fields, with unit tests.<|im_end|>
+<|im_start|>assistant
+```rust
+/// Parses a single CSV line into a vector of fields.
+/// Handles quoted fields (enclosed in double quotes) where commas and newlines
+/// inside quotes are treated as literal characters.
+/// Escaped quotes within quoted fields are represented by two consecutive double quotes ("").
+pub fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current_field = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                // Check if the next character is also a quote (escaped quote)
+                if chars.peek() == Some(&'"') {
+                    chars.next(); // consume the second quote
+                    current_field.push('"');
+                } else {
+                    // End of quoted field
+                    in_quotes = false;
+                }
+            } else {
+                current_field.push(ch);
+            }
+        } else {
+            if ch == '"' {
+                // Start of a quoted field
+                in_quotes = true;
+            } else if ch == ',' {
+                fields.push(std::mem::take(&mut current_field));
+            } else {
+                current_field.push(ch);
+            }
+        }
+    }
+
+    // Push the last field
+    fields.push(current_field);
+
+    fields
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_fields() {
+        let result = parse_csv_line("a,b,c");
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_quoted_field_with_comma() {
+        let result = parse_csv_line("\"a,b\",c");
+        assert_eq!(result, vec!["a,b", "c"]);
+    }
+
+    #[test]
+    fn test_quoted_field_with_double_quotes() {
+        let result = parse_csv_line("\"a\"\"b\",c");
+        assert_eq!(result, vec!["a\"b", "c"]);
+    }
+
+    #[test]
+    fn test_single_field() {
+        let result = parse_csv_line("hello");
+        assert_eq!(result, vec!["hello"]);
+    }
+
+    #[test]
+    fn test_empty_line() {
+        let result = parse_csv_line("");
+        assert_eq!(result, vec![""]);
+    }
+
+    #[test]
+    fn test_empty_fields() {
+        let result = parse_csv_line("a,,c");
+        assert_eq!(result, vec!["a", "", "c"]);
+    }
+
+    #[test]
+    fn test_quoted_field_around_comma() {
+        let result = parse_csv_line("\"a\",\"b\",\"c\"");
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_field_with_spaces() {
+        let result = parse_csv_line("a, b ,c");
+        assert_eq!(result, vec!["a", " b ", "c<|im_end|>
+<|im_start|>user
+Summarize the plot of Romeo and Juliet in 200 words.<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Analyze User Request:**
+   - **Topic:** Romeo and Juliet (Shakespeare's play)
+   - **Task:** Summarize the plot
+   - **Constraint:** Exactly or around 200 words (I'll aim for close to 200, typically within 10-15 words is fine, but I'll count carefully)
+
+2.  **Identify Key Plot Points:**
+   - Setting: Verona, Italy
+   - Conflict: Feud between Montagues and Capulets
+   - Meeting: Romeo (Montague) and Juliet (Capulet) meet at a masquerade ball, fall in love instantly
+   - Secret Marriage: Friar Laurence marries them secretly, hoping to end the feud
+   - Complications: Tybalt kills Mercutio; Romeo kills Tybalt and is exiled
+   - Juliet's Parents: Arrange marriage to Paris
+   - Plan: Friar gives Juliet a sleeping potion to fake death; message to Romeo fails to deliver
+   - Tragedy: Romeo finds "dead" Juliet, poisons himself; Juliet wakes, finds him dead, stabs herself
+   - Resolution: Families reconcile upon discovering the tragedy; Prince comments on the feud's cost
+
+3.  **Draft - Mental Refinement (aiming for ~200 words):**
+   In Verona, a bitter feud between the Montague and Capulet families fuels ongoing violence. At a Capulet masquerade, Romeo Montague and Juliet Capulet meet and instantly fall in love, unaware of each other’s identities. After discovering the truth, they marry in secret the next day, with Friar Laurence hoping the union will reconcile their houses. Their fragile peace shatters when Tybalt, Juliet’s cousin, kills Romeo’s friend Mercutio. Enraged, Romeo avenges him by killing Tybalt and is subsequently banished. Meanwhile, Juliet’s parents, unaware of her marriage, arrange her union with Count Paris. Desperate to avoid the wedding, Juliet seeks Friar Laurence’s help. He devises a plan: she will drink a potion that mimics death for forty-two hours, allowing her to escape with Romeo once she’s discovered in the tomb. Tragically, the Friar’s message never reaches Romeo. Believing Juliet truly dead, Romeo buys poison, drinks it beside her corpse, and dies. Juliet awakens moments later, finds Romeo lifeless, and stabs herself. The lovers’ suicides finally shock the feuding families into reconciliation, though the Prince condemns their long-standing hatred as the true tragedy.
+
+4.  **Word Count Check:**
+   Let's count the words carefully.
+   In (1) Verona, (2) a (3) bitter (4) feud (5) between (6) the (7) Montague (8) and (9) Capulet (10) families (11) fuels (12) ongoing (13) violence. (14) At (15) a (16) Capulet (17) masquerade, (18) Romeo (19) Montague (20) and (21) Juliet (22) Capulet (23) meet (24) and (25) instantly (26) fall (2
+</think>
+
+<|im_end|>
+<|im_start|>user
+Summarize the plot of Romeo and Juliet in 200 words.<|im_end|>
+<|im_start|>assistant
+In Verona, the longstanding feud between the Capulet and Montague families sets the stage for tragedy. At a masked ball, Romeo Montague and Juliet Capulet meet and instantly fall in love, unaware of each other’s identities. After discovering their familial connection, they secretly marry the next day with the help of Friar Laurence, who hopes the union will reconcile their houses.
+
+Meanwhile, Romeo kills Juliet’s cousin Tybalt in a duel, leading the Prince to banish him from Verona. To avoid a forced marriage to Paris, Juliet conspires with Friar Laurence. He provides her with a potion that induces a death-like sleep for 42 hours, planning to rescue her once she wakes in the family tomb. However, the message explaining the plan fails to reach Romeo due to a quarantine.
+
+Believing Juliet truly dead, Romeo buys poison and returns to Verona. He enters the tomb, kills Paris, and drinks the poison beside Juliet’s body. Moments later, Juliet awakens to find Romeo dead. Devastated, she stabs herself with his dagger. The grief-stricken parents discover the lovers’ bodies and, witnessing the tragic cost of their hate, finally reconcile to end their feud. The play concludes with the Prince’s lament on the futility of their violence and the profound loss suffered by both families.<|im_end|>
+<|im_start|>user
+用繁體中文寫一個Python程式，讀取Excel檔案並計算每月銷售總額，附註解。<|im_end|>
+<|im_start|>assistant
+```python
+# 導入必要的庫
+import pandas as pd
+import os
+
+def calculate_monthly_sales(excel_file_path):
+    """
+    讀取 Excel 檔案並計算每月銷售總額
+    
+    參數:
+    excel_file_path (str): Excel 檔案的路徑
+    
+    返回:
+    pd.DataFrame: 包含每月銷售總額的 DataFrame
+    """
+    
+    # 檢查檔案是否存在
+    if not os.path.exists(excel_file_path):
+        raise FileNotFoundError(f"找不到檔案: {excel_file_path}")
+    
+    # 讀取 Excel 檔案，假設資料包含 '銷售日期' 和 '銷售金額' 兩個欄位
+    # 如果欄位名稱不同，請根據實際情況修改
+    try:
+        # 讀取 Excel 檔案，使用 sheet_name=0 讀取第一個工作表
+        df = pd.read_excel(excel_file_path, sheet_name=0)
+    except Exception as e:
+        raise Exception(f"讀取 Excel 檔案時發生錯誤: {e}")
+    
+    # 檢查必要的欄位是否存在
+    # 假設 Excel 中有 '銷售日期' 和 '銷售金額' 兩個欄位
+    required_columns = ['銷售日期', '銷售金額']
+    for col in required_columns:
+        if col not in df.columns:
+            raise ValueError(f"Excel 檔案中缺少必要的欄位: {col}")
+    
+    # 將 '銷售日期' 欄位轉換為 datetime 格式，以便提取月份
+    df['銷售日期'] = pd.to_datetime(df['銷售日期'], errors='coerce')
+    
+    # 移除日期無法解析的遺漏值
+    df = df.dropna(subset=['銷售日期'])
+    
+    # 新增 '年月' 欄位，格式為 'YYYY-MM'，方便按月分組
+    df['年月'] = df['銷售日期'].dt.to_period('M')
+    
+    # 將 '銷售金額' 轉換為數值類型，若有非數值則設為 0
+    df['銷售金額'] = pd.to_numeric(df['銷售金額'], errors='coerce').fillna(0)
+    
+    # 按 '年月' 分組並計算每月的銷售總額
+    monthly_sales = df.groupby('年月')['銷售金額'].sum().reset_index()
+    
+    # 將 '年月' 欄位轉換為字串格式，方便顯示
+    monthly_sales['年月'] = monthly_sales['年月'].astype(str)
+    
+    # 按年月排序
+    monthly_sales = monthly_sales.sort_values('年月').reset_index(drop=True)
+    
+    # 重新命名欄位，使輸出更清晰
+    monthly_sales.rename(columns={'年月': '月份', '銷售金額': '銷售總額'}, inplace=True)
+    
+    return monthly_sales
+
+
+if __name__ == "__main__":
+    # 設定 Excel 檔案路徑
+    excel_file = "sales_data.xlsx"
+    
+    try:
+        # 計算每月銷售總額
+        result = calculate_monthly_sales(excel_file)
+        
+        # 顯示結果
+        print("每月銷售總額:")
+        print(result.to_string(index=False))
+        
+    except Exception<|im_end|>
+<|im_start|>user
+解釋H3C交換機上面點樣設定VLAN同trunk，畀出命令例子。<|im_end|>
+<|im_start|>assistant
+設定 H3C 交換機（使用 Comware 作業系統）嘅 VLAN 同 Trunk 主要分為兩個部分：首先建立 VLAN，然後喺介面（Interface）上面將 VLAN 標籤化（Tagging）。
+
+以下係詳細嘅步驟同命令例子，假設你使用 **H3C Comware V7** 系統（目前最常用）：
+
+---
+
+### 📌 情境假設
+*   **Switch A** 同 **Switch B** 需要互相連接。
+*   需要建立 **VLAN 10** (例如：財務部) 同 **VLAN 20** (例如：人事部)。
+*   Switch A 同 Switch B 之間嘅連接埠（例如 GigabitEthernet 1/0/1）需要設為 **Trunk**，允許 VLAN 10 同 20 通過。
+*   Switch A 嘅另一個埠（例如 GigabitEthernet 1/0/2）連接電腦，設為 **Access**，只屬於 VLAN 10。
+
+---
+
+## ✅ 第一步：進入系統視圖並建立 VLAN
+
+```bash
+<H3C> system-view          # 進入系統視圖
+[H3C] vlan 10              # 建立 VLAN 10
+[H3C-vlan10] quit          # 退出 VLAN 視圖
+[H3C] vlan 20              # 建立 VLAN 20
+[H3C-vlan20] quit
+```
+
+> 💡 小提示：如果你使用較舊嘅 Comware V5 系統，命令可能係 `vlan batch 10 20` 一次過建立。
+
+---
+
+## ✅ 第二步：設定 Trunk 介面（交換機之間連接）
+
+假設 Switch A 同 Switch B 用 **GigabitEthernet 1/0/1** 連接：
+
+```bash
+[H3C] interface GigabitEthernet 1/0/1   # 進入介面視圖
+[H3C-GigabitEthernet1/0/1] port link-type trunk   # 設定介面類型為 Trunk
+[H3C-GigabitEthernet1/0/1] port trunk permit vlan 10 20  # 允許 VLAN 10 同 20 通過
+[H3C-GigabitEthernet1/0/1] quit
+```
+
+### 🔍 解釋：
+*   `port link-type trunk`：將介面設為 Trunk 模式，可以傳輸多個 VLAN 嘅數據。
+*   `port trunk permit vlan 10 20`：只允許 VLAN 10 同 20 嘅流量通過。未列入嘅 VLAN 會被過濾掉。
+*   ⚠️ **注意**：預設情況下，Trunk 介面通常只允許 **VLAN 1** 通過。如果你需要其他 VLAN 通過，必須手動添加。
+
+---
+
+## ✅ 第三步：設定 Access 介面（連接終端設備，如電腦）
+
+假設 Switch A 嘅 **GigabitEthernet 1/0/2** 連接一台電腦，屬於 VLAN 10：
+
+```bash
+[H3C] interface Gigabit<|im_end|>
+<|im_start|>user
+用繁體中文解釋量子計算嘅基本概念同佢對密碼學嘅影響。<|im_end|>
+<|im_start|>assistant
+<think>
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Language:** Traditional Chinese (繁體中文)
+   - **Topic:** Quantum Computing (量子計算)
+   - **Specific Aspects:** Basic concepts (基本概念) and its impact on cryptography (對密碼學嘅影響)
+   - **Tone/Style:** Informative, clear, technical but accessible, in Traditional Chinese
+
+2.  **Deconstruct the Request:**
+   - Part 1: Basic concepts of quantum computing
+   - Part 2: Impact on cryptography
+   - Language: Traditional Chinese throughout
+
+3.  **Part 1: Basic Concepts of Quantum Computing (量子計算基本概念)**
+   - Need to explain core principles in an accessible way:
+     - Qubits (量子位元) vs Classical bits
+     - Superposition (疊加態)
+     - Entanglement (量子糾纏)
+     - Quantum Interference (量子干涉)
+     - Quantum Gates/Operations (量子閘/運算)
+     - Measurement (測量/塌縮)
+   - Structure: Start with a simple analogy/intro, then explain each concept clearly, then summarize how these enable quantum advantage.
+
+4.  **Part 2: Impact on Cryptography (對密碼學嘅影響)**
+   - Need to cover:
+     - Threat to classical cryptography (asymmetric vs symmetric)
+     - Shor's algorithm (Shor演算法) - breaks RSA, ECC, DSA
+     - Grover's algorithm (Grover演算法) - speeds up symmetric key search, reduces effective key length by half
+     - Post-quantum cryptography (PQC, 後量子密碼學) - NIST standardization, lattice-based, hash-based, etc.
+     - Quantum Key Distribution (QKD, 量子金鑰分配) - BB84 protocol, security based on physics
+     - Transition/Readiness challenges
+   - Structure: Explain the threat, then the defense/response, then practical implications.
+
+5.  **Draft - Section by Section (Mental Refinement in Traditional Chinese):**
+   *(Introduction)*
+   量子計算是一種利用量子力學原理進行資訊處理的新型計算範式。與傳統電腦不同，它不依賴經典的「0」與「1」，而是透過量子態來儲存與運算資訊。以下分為「基本概念」與「對密碼學的影響」兩部分說明。
+
+   *(基本概念)*
+   1. **量子位元（Qubit）**：傳統位元只能處於 0 或 1，量子位元則可同時處於 0 與 1 的疊加態（Superposition），大幅提升並行運算潛力。
+   2. **疊加態（Superposition）**：多個量子位元可同時表示 $2^n$ 種狀態（n 為位元數），使量子電腦能同時探索大量解空間。
+   3. **量子糾纏（Entanglement）**：兩個或多個量子位元可產生強關聯，改變其中一個會瞬間影響另一個，無論距離多遠。這讓量子運算能實現高度協同。
+   4. **量子干涉（Interference）**：量子演算法透過精心設計的運算步驟，讓正確答案的
+</think>
+
+<|im_end|>
+<|im_start|>user
+用繁體中文解釋量子計算嘅基本概念同佢對密碼學嘅影響。<|im_end|>
+<|im_start|>assistant
+量子計算係一種利用量子力學原理來處理資訊嘅新型計算模式。同傳統電腦不同，傳統電腦用「位元」（Bit）做基本單位，而量子計算機則用「量子位元」（Qubit，即 Quantum Bit）。
+
+以下係量子計算嘅基本概念，以及佢對密碼學嘅深遠影響：
+
+### 一、量子計算嘅基本概念
+
+量子計算機嘅強大能力主要來自三個核心量子現象：
+
+1. **疊加態（Superposition）**
+   - 傳統位元只能係 0 或者 1。
+   - 量子位元可以同時處於 0 同 1 嘅疊加狀態。這意味著，如果有 \( n \) 個量子位元，佢就可以同時表示 \( 2^n \) 種狀態。這讓量子計算機能夠同時處理海量嘅可能性，從而實現指數級嘅速度提升。
+
+2. **糾纏（Entanglement）**
+   - 當兩個或多個量子位元糾纏在一起時，無論佢哋相距多遠，一個位元嘅狀態改變會瞬間影響另一個位元嘅狀態。
+   - 這使得量子計算機可以高效地協同處理複雜問題，增強計算能力。
+
+3. **干涉（Interference）**
+   - 量子計算利用干涉來放大正確答案嘅機率，並抵消錯誤答案嘅機率。這類似於水波嘅干涉，通過精確控制，讓正確嘅計算路徑產生建設性干涉，錯誤嘅路徑產生破壞性干涉，從而在測量時得到正確結果。
+
+### 二、量子計算對密碼學嘅影響
+
+目前大多數加密技術（如 RSA、ECC）都依賴於傳統電腦難以解決的數學難題，例如**大整數分解**或**離散對數問題**。量子計算機出現後，這些基礎將受到嚴重威脅。
+
+#### 1. 對現行公鑰密碼學嘅威脅
+
+- **Shor 演算法（Shor's Algorithm）**
+  - 由數學家 Peter Shor 提出，量子計算機可以運行此演算法，在多項式時間內分解大整數。
+  - **影響**：RSA 和 Diffie-Hellman 等基於大數分解困難性嘅加密系統將被輕易破解。同樣地，基於橢圓曲線密碼學（ECC）嘅系統也會被破解，因為 Shor 演算法也能解決離散對數問題。
+  - **後果**：目前互聯網安全（如 HTTPS、電子商務、數位簽名）、區塊鏈技術等都可能面臨安全危機。
+
+- **Grover 演算法（Grover's Algorithm）**
+  - 這是一種搜尋演算法，可以在非結構化資料庫中實現平方根級別嘅加速。
+  - **影響**：對對稱加密算法（如 AES）和雜湊函數（如 SHA-256）嘅影響相對較小，但依然構成威脅。例如，AES-256 在量子計算機下嘅安全性相當於傳統電腦下 AES-128 嘅水平。
+  - **對策**：只需<|im_end|>
+<|im_start|>user
+Write a Kubernetes deployment YAML with HPA, liveness probes and resource limits, and explain each part.<|im_end|>
+<|im_start|>assistant
+Here is a comprehensive Kubernetes `Deployment` YAML configuration that includes **Horizontal Pod Autoscaler (HPA)**, **liveness probes**, and **resource limits**. I'll also explain each part in detail.
+
+---
+
+### ✅ Full YAML: `deployment-with-hpa.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-deployment
+  labels:
+    app: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app-container
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+          # Resource limits and requests
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+```
+
+---
+
+### 🔍 Explanation of Each Part
+
+#### 1. **Deployment Metadata**
+```yaml
+metadata:
+  name: my-app-deployment
+  labels:
+    app: my-app
+```
+- **`name`**: Unique identifier for the Deployment.
+- **`labels`**: Used for selecting and organizing resources.
+
+---
+
+#### 2. **Deployment Spec**
+```yaml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+```
+- **`replicas`**: Starts with 2 pod replicas.
+- **`selector.matchLabels`**: Defines which pods this Deployment manages. Must match the labels in the template.
+
+---
+
+#### 3. **Pod Template**
+```yaml
+template:
+  metadata:
+    labels:
+      app: my-app
+  spec:
+    containers:
+      - name: my-app-container
+        image: nginx:1.25
+<|im_end|>

@@ -1,0 +1,13 @@
+[Unit]
+Description=llama.cpp server - Qwen3.6-35B-A3B UD-IQ4_XS on Arc Pro B50 (SYCL)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tony
+ExecStart=/home/tony/src/run-sycl.sh /home/tony/models/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf /tmp/llama-qwen36.log -ncmoe 10 -c 131072 -np 4 --kv-unified --load-mode none -ctk q8_0 -ctv q8_0 --mmproj /home/tony/models/mmproj-Qwen3.6-35B-A3B-Q8_0.gguf --alias qwen3.6-35b-a3b
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

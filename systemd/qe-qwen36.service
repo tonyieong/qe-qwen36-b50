@@ -1,0 +1,14 @@
+[Unit]
+Description=qe engine - Qwen3.6-35B-A3B on Arc Pro B50 (custom SYCL engine, OpenAI API)
+After=network-online.target
+Conflicts=llama-qwen36.service
+
+[Service]
+User=tony
+Environment=QE_PORT=8080
+ExecStart=/home/tony/src/engine/run-qe.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

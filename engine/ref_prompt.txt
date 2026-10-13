@@ -1,0 +1,7 @@
+<|im_start|>user
+用繁體中文解釋一下MoE模型入面expert routing係點運作，再寫一個Python函數計算softmax。<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
