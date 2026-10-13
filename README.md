@@ -46,3 +46,7 @@ qconv --mtp <mtp-Q8_0.gguf> qwen36-qe-mtp.pack             # MTP pack
 ```
 
 Paths in the scripts are specific to the author's VM; adjust them. Model weights are not included.
+
+## License
+
+MIT (see `LICENSE`). Uses llama.cpp (MIT) for tokenization and the vision encoder; the chat template is from Qwen.
