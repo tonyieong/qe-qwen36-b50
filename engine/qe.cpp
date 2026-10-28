@@ -966,6 +966,58 @@ struct Engine {
     // stats
     long n_tok = 0, n_miss = 0;
     double cpu_ms = 0;
+    // dynamic expert cache: decayed routing counts per (layer, expert); every `adapt_every` routed tokens the hottest
+    // experts in RAM swap places with the coldest ones in VRAM (host keeps a copy of every expert, so a swap is one upload)
+    std::vector<float> heat;
+    std::vector<int32_t> slot_key;     // arena slot -> layer*256+e
+    int adapt_every = 0, adapt_swaps = 64;
+    float adapt_decay = 0.95f, adapt_margin = 1.25f;
+    long heat_tok = 0, n_swaps = 0, n_rounds = 0;
+    std::string profile_path;
+    double profile_saved_ms = 0;
+    void note(int key, float w) { heat[key] += w; }
+    void save_profile() {
+        if (profile_path.empty()) return;
+        const std::string tmp = profile_path + ".tmp";
+        FILE * f = fopen(tmp.c_str(), "wb");
+        if (!f) return;
+        const uint32_t magic = 0x51455046, n = (uint32_t) heat.size();
+        fwrite(&magic, 4, 1, f); fwrite(&n, 4, 1, f); fwrite(heat.data(), 4, heat.size(), f);
+        fclose(f);
+        rename(tmp.c_str(), profile_path.c_str());
+        profile_saved_ms = now_ms();
+    }
+    // call between steps (no GPU work in flight that reads the arena)
+    void adapt() {
+        if (adapt_every <= 0 || heat_tok < adapt_every) return;
+        const float decay = std::pow(adapt_decay, (float) heat_tok / adapt_every);
+        heat_tok = 0;
+        ++n_rounds;
+        const int S = adapt_swaps;
+        std::vector<int> hot, cold;
+        hot.reserve(heat.size()); cold.reserve(heat.size());
+        for (int k = 0; k < (int) heat.size(); ++k) (slot_h[k] < 0 ? hot : cold).push_back(k);
+        const int nh = std::min<int>(S, hot.size()), nc = std::min<int>(S, cold.size());
+        std::partial_sort(hot.begin(), hot.begin() + nh, hot.end(), [&](int a, int b) { return heat[a] > heat[b]; });
+        std::partial_sort(cold.begin(), cold.begin() + nc, cold.end(), [&](int a, int b) { return heat[a] < heat[b]; });
+        int ns = 0;
+        for (int i = 0; i < std::min(nh, nc); ++i) {
+            const int h = hot[i], c = cold[i];
+            if (heat[h] <= heat[c] * adapt_margin + 0.5f) break;
+            if (!ns) q.wait();
+            const int sl = slot_h[c];
+            slot_h[c] = -1; slot_h[h] = sl; slot_key[sl] = h;
+            q.memcpy(arena + (size_t) sl * exp_bytes(), host_exp[h], exp_bytes());
+            ++ns;
+        }
+        if (ns) {
+            q.memcpy(slot_d, slot_h.data(), slot_h.size() * 4);
+            q.wait();
+            n_swaps += ns;
+        }
+        for (float & v : heat) v *= decay;
+        if (!profile_path.empty() && now_ms() - profile_saved_ms > 300000) save_profile();
+    }
 
     uint8_t * dmalloc(size_t n) { uint8_t * p = sycl::malloc_device<uint8_t>(n, q); if (!p) { fprintf(stderr, "device alloc %zu failed\n", n); exit(1); } dev_bytes += n; return p; }
     float * dfill(size_t n, float v) { float * p = (float *) dmalloc(n * 4); q.fill(p, v, n).wait(); return p; }
@@ -1090,26 +1142,50 @@ struct Engine {
             }
             fclose(f);
         }
+        // starting heat: a saved profile if there is one, else the routing stats scaled to ~2000 tokens worth of evidence
+        heat.assign(N_LAYER * N_EXPERT, 0.f);
+        bool from_profile = false;
+        if (const char * pp = getenv("QE_PROFILE")) {
+            profile_path = pp;
+            if (FILE * f = fopen(pp, "rb")) {
+                uint32_t magic = 0, n = 0;
+                if (fread(&magic, 4, 1, f) == 1 && fread(&n, 4, 1, f) == 1 && magic == 0x51455046 && n == heat.size() &&
+                    fread(heat.data(), 4, n, f) == n) from_profile = true;
+                fclose(f);
+            }
+        }
+        if (!from_profile) {
+            double tot = 0; for (auto c : cnt) tot += c;
+            const double sc = tot > 0 ? 2000.0 * N_LAYER * K_USED / tot : 0;
+            for (size_t k = 0; k < heat.size(); ++k) heat[k] = (float) (cnt[k] * sc);
+        }
         std::vector<int> order(N_LAYER * N_EXPERT);
         for (size_t i = 0; i < order.size(); ++i) order[i] = (int) i;
-        std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return cnt[a] > cnt[b]; });
+        if (from_profile) std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return heat[a] > heat[b]; });
+        else std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return cnt[a] > cnt[b]; });
+        adapt_every = getenv("QE_ADAPT") ? atoi(getenv("QE_ADAPT")) : 256;
+        if (getenv("QE_ADAPT_SWAPS")) adapt_swaps = atoi(getenv("QE_ADAPT_SWAPS"));
+        if (getenv("QE_ADAPT_DECAY")) adapt_decay = (float) atof(getenv("QE_ADAPT_DECAY"));
         resident = std::min(resident, N_LAYER * N_EXPERT);
         slot_h.assign(N_LAYER * N_EXPERT, -1);
         host_exp.assign(N_LAYER * N_EXPERT, nullptr);
         arena = dmalloc((size_t) resident * exp_bytes());
+        slot_key.assign(resident, -1);
         for (int s = 0; s < resident; ++s) {
             const int k = order[s];
-            slot_h[k] = s;
+            slot_h[k] = s; slot_key[s] = k;
             const uint8_t * src = pk.ptr("blk." + std::to_string(k / N_EXPERT) + ".experts") + (size_t) (k % N_EXPERT) * exp_bytes();
             q.memcpy(arena + (size_t) s * exp_bytes(), src, exp_bytes());
             if (s % 256 == 255) q.wait();
         }
         q.wait();
         const int n_host = N_LAYER * N_EXPERT - resident;
-        const size_t hb = ((size_t) n_host * exp_bytes() + (2 << 20)) & ~(size_t) ((2 << 20) - 1);
+        // with the adaptive cache every expert needs a host copy (any of them can be evicted later)
+        const int n_hcopy = adapt_every > 0 ? N_LAYER * N_EXPERT : n_host;
+        const size_t hb = ((size_t) n_hcopy * exp_bytes() + (2 << 20)) & ~(size_t) ((2 << 20) - 1);
         host_arena = (uint8_t *) std::aligned_alloc(2 << 20, std::max<size_t>(hb, 2 << 20));
         madvise(host_arena, hb, MADV_HUGEPAGE);
-        for (int s = resident, j = 0; s < N_LAYER * N_EXPERT; ++s, ++j) {
+        for (int s = adapt_every > 0 ? 0 : resident, j = 0; s < N_LAYER * N_EXPERT; ++s, ++j) {
             const int k = order[s];
             const uint8_t * src = pk.ptr("blk." + std::to_string(k / N_EXPERT) + ".experts") + (size_t) (k % N_EXPERT) * exp_bytes();
             uint8_t * dst = host_arena + (size_t) j * exp_bytes();
@@ -1120,6 +1196,8 @@ struct Engine {
         q.memcpy(slot_d, slot_h.data(), slot_h.size() * 4).wait();
         printf("experts: %d in VRAM (%.2f GB), %d in RAM (%.2f GB); device total %.2f GB; load %.1f s\n", resident,
                resident * exp_bytes() / 1e9, n_host, n_host * exp_bytes() / 1e9, dev_bytes / 1e9, (now_ms() - t0) / 1e3);
+        if (adapt_every > 0) printf("adaptive expert cache: every %d tokens, up to %d swaps, decay %.2f, start from %s\n", adapt_every,
+                                    adapt_swaps, adapt_decay, from_profile ? profile_path.c_str() : "routing stats");
         pool.start(getenv("QE_THREADS") ? atoi(getenv("QE_THREADS")) : 12);
         pool.out = hio->cpu_out;
         X = dfill((size_t) T_MAX * D, 0); X2 = dfill((size_t) T_MAX * D, 0); XN = dfill((size_t) T_MAX * D, 0);
@@ -1616,6 +1694,7 @@ struct Engine {
                     miss[t] = 0;
                     for (int k = 0; k < K_USED; ++k) {
                         const int key = il * N_EXPERT + ids_host[t * K_USED + k];
+                        heat[key] += 1.f;
                         if (slot_h[key] < 0) { pool.exp_ptr[nm] = host_exp[key]; pool.exp_w[nm] = wb_host[t * K_USED + k]; pool.miss_tok[nm] = t; ++nm; ++miss[t]; }
                     }
                     pool.outs[t] = cpu_outm + (size_t) t * D;
@@ -1672,7 +1751,7 @@ struct Engine {
                 if (it.get_local_id(0) == 0) tb[t] = who;
             });
         }
-        n_tok += NT;
+        n_tok += NT; heat_tok += NT;
         sq = sq_saved;
     }
     template <int NT>
@@ -1901,6 +1980,10 @@ struct Engine {
         // resident experts on the GPU, cold experts on the CPU at the same time
         std::vector<int> cold;
         std::vector<int> bslot(N_EXPERT, -1);
+        if (slots == slot_h.data()) {
+            for (int e = 0; e < N_EXPERT; ++e) heat[key0 + e] += (float) cnt[e];
+            if (key0 == 0) heat_tok += T;
+        }
         for (int e = 0; e < N_EXPERT; ++e) {
             if (!cnt[e]) continue;
             const int s = slots[key0 + e];
@@ -2452,6 +2535,7 @@ struct Engine {
             int nm = 0;
             for (int k = 0; k < K_USED; ++k) {
                 const int key = il * N_EXPERT + hio->ids[k];
+                heat[key] += 1.f;
                 if (slot_h[key] < 0) { pool.exp_ptr[nm] = host_exp[key]; pool.exp_w[nm] = hio->wts[k]; ++nm; }
             }
             if (nm) {
@@ -2500,7 +2584,7 @@ struct Engine {
                 if (it.get_local_id(0) == 0) tk[0] = who;
             });
         }
-        ++n_tok;
+        ++n_tok; ++heat_tok;
     }
     int argmax() { int t; q.memcpy(&t, tok, 4).wait(); return t; }
 };
@@ -3089,6 +3173,7 @@ struct Server {
             if (any_prompt) run_prompt_chunk();
             if (any_gen) run_gen_step();
             eng.q.wait();
+            eng.adapt();
         }
     }
 
@@ -3305,7 +3390,9 @@ struct Server {
         });
         svr.Get("/props", [this](const httplib::Request &, httplib::Response & res) {
             res.set_content(json{{"total_slots", (int) slots.size()}, {"n_ctx_per_slot", eng.max_ctx}, {"kv_pool", eng.pool_ctx},
-                                 {"kv_pool_used", eng.kv_used_blocks() * Engine::KV_BLK}, {"mtp", eng.has_mtp}}.dump(), "application/json");
+                                 {"kv_pool_used", eng.kv_used_blocks() * Engine::KV_BLK}, {"mtp", eng.has_mtp},
+                                 {"expert_hit_rate", eng.n_tok ? 1.0 - (double) eng.n_miss / ((double) eng.n_tok * N_LAYER * K_USED) : 0.0},
+                                 {"expert_swaps", eng.n_swaps}, {"expert_lookups", eng.n_tok * N_LAYER * K_USED}, {"expert_misses", eng.n_miss}, {"adapt_rounds", eng.n_rounds}}.dump(), "application/json");
         });
         svr.Post("/v1/chat/completions", [this](const httplib::Request & req, httplib::Response & res) { handle_chat(req, res); });
         svr.Post("/chat/completions", [this](const httplib::Request & req, httplib::Response & res) { handle_chat(req, res); });

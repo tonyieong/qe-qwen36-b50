@@ -120,6 +120,25 @@
 - 4 個 agent 各約 28K 同時送入：每個 prefill 約 240 秒，decode 每個 9–12 tok/s，257 秒內全部完成，pool 用了 113K。
 - 2 個約 70K 同時送入（總量超過 pool）：第一版其中一個做了 444 秒才回 503「KV cache pool exhausted」。原因是兩個請求入隊時 pool 都是空的，block 要到 prefill 時才分配。加入 admission control（入隊時先承諾 block，放不下就排隊）後，第二個請求會等第一個完成再執行，兩個都成功（242 秒 + 480 秒）。
 
+## 2026-10-28：v1.7，動態 expert cache 與換模型
+
+**動態 expert cache**：做法見 DESIGN.md 第 4 節。A/B 測試（同一批 12 個寫程式碼的請求，看最後 5 個）：
+
+| 設定 | 命中率 | Decode |
+|---|---|---|
+| 固定 | 約 81% | 約 52.7 tok/s |
+| 動態，每輪最多 16 對 | 約 85% | 約 53.7 tok/s |
+| 動態，每輪最多 64 對 | 約 90% | 約 55.2 tok/s |
+
+預設定為 64 對。
+
+**換成 HauhauCS Qwen3.6-35B-A3B-Uncensored-Aggressive**（abliterated 版本，架構相同）：
+- 來源用它的 Q8_K_P GGUF（44 GB）。檢查後發現 tensor 只有 F32 / F16 / Q8_0，仍然順手把 `qconv` 改成可解量化任何 ggml 格式。
+- 它沒有 MTP 層，所以沿用原版的 MTP pack 當草稿。輸出由新模型驗證，所以正確性不受影響；實測速度與原版相若（54–57 tok/s）。
+- 準確度：與它自己的 Q8 比較，KL 0.0153，top-1 95.5%，greedy 32/32（原版為 0.0142 / 95.8%）。
+- 坑：llama.cpp 版本的 IQ4_XS 比 Unsloth 版大 1 GB，加上 f16 mmproj，`-ncmoe 10` 和 `12` 一處理圖片就 DEVICE_LOST，要 `-ncmoe 14` 才穩定（約 30 tok/s）。qe 不受影響，因為視覺編碼器在 CPU。
+- 坑：VM 重開後 `/tmp` 被清空，測試腳本要從 repo 取回。
+
 ## 最終數字
 
 | | llama.cpp SYCL | qe |

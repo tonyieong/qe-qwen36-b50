@@ -33,7 +33,11 @@ static std::vector<float> dequant_rows(const GTensor & t, int64_t row0, int64_t 
             }
         }
     } else {
-        throw std::runtime_error("unsupported source type for " + t.name);
+        // any other ggml type (K-quants, i-quants, BF16 ... as used by mixed "K_P" GGUFs): ggml's own dequantizer
+        const ggml_type_traits * tr = ggml_get_type_traits((ggml_type) t.type);
+        if (!tr || !tr->to_float) throw std::runtime_error("unsupported source type for " + t.name);
+        const size_t rb = ggml_row_size((ggml_type) t.type, cols);
+        for (int64_t r = 0; r < nrows; ++r) tr->to_float(t.data + (size_t) (row0 + r) * rb, out.data() + (size_t) r * cols, cols);
     }
     return out;
 }

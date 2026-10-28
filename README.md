@@ -23,6 +23,7 @@ Design notes and development log (in Chinese): [DESIGN.md](DESIGN.md), [DEVLOG.m
 - Weight formats: experts IQ4_NL (4.5 bpw), DeltaNet + lm_head Q6, attention + shared experts Q8, int8 KV cache (fp16 scale per 16 values)
 - MTP speculative decoding with DeltaNet state snapshot/restore
 - XMX (joint_matrix) MoE prefill and flash attention; oneMKL for dense prefill
+- Adaptive expert cache: decayed routing counts per expert; every 256 tokens the hottest experts in RAM swap with the coldest in VRAM (up to 64 per round), learned profile saved next to the pack (`QE_PROFILE`)
 - Multi-slot continuous batching: 4 slots × up to 128K context sharing a paged 128K-position KV pool, admission control (queues requests that do not fit), prefix cache + prompt checkpoints for multi-turn reuse
 - OpenAI API: `/v1/chat/completions` with streaming, `reasoning_content`, tool calls (Qwen template rendered byte-identical to jinja2), images via llama.cpp libmtmd (CPU vision encoder)
 
@@ -46,6 +47,8 @@ qconv Qwen3.6-35B-A3B-Q8_0.gguf qwen36-qe.pack            # main pack
 qconv --mtp <mtp-Q8_0.gguf> qwen36-qe-mtp.pack             # MTP pack
 ./engine/run-qe.sh                                          # serves on :8090 (QE_PORT)
 ```
+
+`run-qe.sh` picks the model with `QE_PACK`, `QE_VOCAB` (GGUF used for the tokenizer) and `QE_MMPROJ`. `qconv` accepts any GGUF whose tensors ggml can dequantize (Q8_0, F16, BF16, K-/i-quants); fine-tunes of the same architecture, such as abliterated variants, convert the same way and can reuse the base model's MTP pack as the drafter.
 
 Paths in the scripts are specific to the author's VM; adjust them. Model weights are not included.
 

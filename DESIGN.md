@@ -45,8 +45,15 @@ llama.cpp SYCL 在這台機上實測 26–32 tok/s。分析後發現兩個結構
 
 ## 4. 熱 / 冷 expert 分工
 
-- **選擇方式**：用一批中英文及程式碼對話記錄每層每個 expert 的使用次數（`phase0/statsA.bin`、`statsB.bin`），按次數排序，最熱門的 N 個放入 VRAM arena（`--resident`，目前 5900 個，約佔全部 10240 個的 58%，數量由剩餘 VRAM 決定）。用一半語料選、另一半驗證，兩個方向結果一致，避免過擬合。
+- **初始選擇**：用一批中英文及程式碼對話記錄每層每個 expert 的使用次數（`phase0/statsA.bin`、`statsB.bin`），按次數排序，最熱門的 N 個放入 VRAM arena（`--resident`，目前 5900 個，約佔全部 10240 個的 58%，數量由剩餘 VRAM 決定）。用一半語料選、另一半驗證，兩個方向結果一致，避免過擬合。
 - **命中率**（held-out）：50% → 75%，60% → 83%，70% → 89%，80% → 94%。每層最熱門 25% expert 承擔 39–62% 的運算。
+- **動態調整（v1.7）**：開機時按上面的統計（或上次保存的 profile）放置，之後每個 expert 記錄一個會衰減的使用次數（每輪乘 0.95）。每處理 256 個 token 做一輪：把 RAM 中最熱的 expert 與 VRAM 中最冷的逐對比較，熱的一方超過冷的一方 1.25 倍才對調，每輪最多 64 對。
+  - 對調只需把 expert 由 host 上傳到被騰出的 arena 位置（約 1.8 MB，PCIe 3.0 約 0.3 ms），所以 host 保留全部 expert 的副本（RAM 佔用由 7.7 GB 增至 18 GB）。
+  - 對調在兩個 step 之間、GPU 閒置時進行，host 的 `slot_h` 與 device 的 `slot_d` 同時更新，避免 kernel 讀到不一致的映射。
+  - 衰減加門檻是為了防止抖動：統計語料只當作約 2000 個 token 的先驗，實際使用很快會蓋過它；但只有明顯更熱的 expert 才會換入。
+  - 學到的使用次數每 5 分鐘寫入 `<pack>.profile`，重開後沿用。
+  - 實測（寫程式碼的請求）：命中率約 81% → 約 90%，decode 52.7 → 55.2 tok/s。提升不大，因為 CPU 部分本來只佔每輪約四分之一時間。
+  - 構想參考了 Strata 的 adaptive tier；具體算法是自己設計的。
 - **冷門 expert 在 CPU 計**：AVX2 IQ4_NL kernel，以 thread pool 執行，與 GPU 同時進行。每層 GPU 與 CPU 同步一次只需約 12 µs，所以分工的同步成本很低。
 - **Thread 數上限 12**：VM 有 16 個 vCPU，但 14–16 條忙等 thread 會與 QEMU 及桌面程式搶 CPU，被搶佔時速度會塌到約 5 tok/s。12 條是穩定的上限。
 - **Prefill 時把最忙的冷門 expert 臨時搬上 GPU**（staging）：一個 chunk 內被大量 token 選中的冷門 expert（≥ `QE_STAGE_MIN`，預設 14 個 token），經 PCIe 搬上 GPU 用 XMX 計，比在 CPU 計快。搬運在第二條 queue 上進行，與常駐 expert 的計算重疊。
